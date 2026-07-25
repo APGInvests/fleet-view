@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-25 log+graph+swipe -->
+<!-- fleetview build 2026-07-25 login-first -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -246,12 +246,11 @@
     <div class="au-logo" id="au_logo"></div>
     <div class="au-h1">FleetView</div>
     <div class="au-sub">Generator Fleet Tracker</div>
-    <input id="au_email" type="email" autocomplete="email" placeholder="Email" />
-    <input id="au_pass" type="password" autocomplete="current-password" placeholder="Password (6+ characters)" />
-    <div class="row" style="gap:8px"><input id="au_first" autocomplete="given-name" placeholder="First name" /><input id="au_last" autocomplete="family-name" placeholder="Last name" /></div>
-    <div class="au-msg" style="margin:2px 0 6px">Name is only needed to create an account — it shows on your logs as "Mike R."</div>
-    <button class="btn primary block" onclick="doSignIn()">Sign in</button>
-    <button class="btn ghost block" style="margin-top:10px" onclick="doSignUp()">Create account</button>
+    <input id="au_email" type="email" autocomplete="email" placeholder="Email" onkeydown="if(event.key==='Enter')authSubmit()" />
+    <input id="au_pass" type="password" autocomplete="current-password" placeholder="Password (6+ characters)" onkeydown="if(event.key==='Enter')authSubmit()" />
+    <div id="au_nameRow" style="display:none"><div class="row" style="gap:8px"><input id="au_first" autocomplete="given-name" placeholder="First name" /><input id="au_last" autocomplete="family-name" placeholder="Last name" /></div><div class="au-msg" style="margin:2px 0 6px">Name shows on your logs as "Mike R." — first name + last initial.</div></div>
+    <button id="au_primaryBtn" class="btn primary block" onclick="authSubmit()">Sign in</button>
+    <div id="au_toggle" style="margin-top:14px;text-align:center;font-size:13px"></div>
     <div id="au_msg" class="au-msg"></div>
   </div>
 </div>
@@ -279,7 +278,7 @@ IC.plus='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width
 /* ===== BACKEND (Supabase shared sync) ===== */
 const SUPA_URL='https://eujgglfcpdfgskyqfggg.supabase.co';
 const SUPA_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1amdnbGZjcGRmZ3NreXFmZ2dnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1ODI4MDksImV4cCI6MjEwMDE1ODgwOX0.0OCf7DeBOeaU3WgihQ2E-cSQ7WdUFPy7DsQJ_2X_8xc';
-const sb=window.supabase.createClient(SUPA_URL,SUPA_KEY,{auth:{persistSession:true,autoRefreshToken:true}});
+const sb=window.supabase.createClient(SUPA_URL,SUPA_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}});
 const KEY='fleetview_settings_v1';let mem=null,STORAGE_OK=true,USER=null,SYNC_READY=false,realtimeCh=null;
 function blankState(){return{settings:{techName:'',warnHours:20,staleHours:6,theme:'dark',homeTab:'jobs',svcEmail:'',jobIcon:'jobs'},shops:[],shows:[],units:[],reports:[],issues:[],movements:[],currentShowId:null};}
 let S=blankState();
@@ -306,8 +305,11 @@ async function flush(){if(!SYNC_READY||flushing)return;flushing=true;try{for(con
 function subscribeRealtime(){try{realtimeCh=sb.channel('fleet_all');TABLES.forEach(t=>realtimeCh.on('postgres_changes',{event:'*',schema:'public',table:t},scheduleReload));realtimeCh.subscribe();}catch(e){console.warn('rt',e);}}
 let reloadTimer=null;
 function scheduleReload(){clearTimeout(reloadTimer);reloadTimer=setTimeout(async()=>{if(flushing){scheduleReload();return;}await loadAll();render();},800);}
-function showAuth(){const g=$('#authgate');if(g)g.style.display='flex';authMsg('');}
+function showAuth(){const g=$('#authgate');if(g)g.style.display='flex';authMsg('');setAuthMode('signin');}
 function hideAuth(){const g=$('#authgate');if(g)g.style.display='none';}
+let authMode='signin';
+function setAuthMode(m){authMode=(m==='signup')?'signup':'signin';const su=authMode==='signup';const nr=$('#au_nameRow'),btn=$('#au_primaryBtn'),tog=$('#au_toggle'),pw=$('#au_pass');if(nr)nr.style.display=su?'block':'none';if(btn)btn.textContent=su?'Create account':'Sign in';if(pw)pw.setAttribute('autocomplete',su?'new-password':'current-password');if(tog)tog.innerHTML=su?'Already have an account? <a href="#" style="color:var(--accent);font-weight:600" onclick="setAuthMode(\'signin\');return false;">Sign in</a>':'New to FleetView? <a href="#" style="color:var(--accent);font-weight:600" onclick="setAuthMode(\'signup\');return false;">Create an account</a>';authMsg('');}
+function authSubmit(){if(authMode==='signup')doSignUp();else doSignIn();}
 function authMsg(m){const e=$('#au_msg');if(e)e.textContent=m||'';}
 async function doSignIn(){const em=($('#au_email').value||'').trim(),pw=$('#au_pass').value||'';if(!em||!pw){authMsg('Enter email and password');return;}authMsg('Signing in…');const {error}=await sb.auth.signInWithPassword({email:em,password:pw});if(error){authMsg(error.message);return;}boot();}
 async function doSignUp(){const em=($('#au_email').value||'').trim(),pw=$('#au_pass').value||'';const fn=($('#au_first').value||'').trim(),ln=($('#au_last').value||'').trim();if(!em||pw.length<6){authMsg('Enter email and a 6+ character password');return;}if(!fn){authMsg('Enter your first name');return;}const disp=fn+(ln?(' '+ln.charAt(0).toUpperCase()+'.'):'');authMsg('Creating account…');const {data,error}=await sb.auth.signUp({email:em,password:pw,options:{data:{name:disp,first:fn,last:ln}}});if(error){authMsg(error.message);return;}if(!(data&&data.session)){const r2=await sb.auth.signInWithPassword({email:em,password:pw});if(r2.error){authMsg('Account created. If confirmation is required, check your email, then Sign in.');return;}}boot();}
