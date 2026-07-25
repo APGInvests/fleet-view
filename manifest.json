@@ -1,0 +1,11 @@
+{
+  "name": "FleetView — Generator Fleet Tracker",
+  "short_name": "FleetView",
+  "description": "Track generators and air conditioners across shows: placement, vitals, photos, and condition — shared live with the crew.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#191714",
+  "theme_color": "#191714"
+}
