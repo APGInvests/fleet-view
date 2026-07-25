@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-25 scanner-live -->
+<!-- fleetview build 2026-07-25 locpin+mapfix -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -136,7 +136,7 @@
   .fchip{white-space:nowrap;border:1.5px solid var(--line);background:var(--surface2);color:var(--ink2);padding:7px 13px;border-radius:999px;font-weight:700;font-size:11px;cursor:pointer;font-family:var(--mono);text-transform:uppercase;letter-spacing:.5px}
   .fchip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
   .fchip.on.down{background:var(--red);border-color:var(--red)}
-  .overlay{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.62);display:none;align-items:flex-end;justify-content:center}
+  .overlay{position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.62);display:none;align-items:flex-end;justify-content:center}
   .overlay.on{display:flex}
   .sheet{background:var(--bg);width:100%;max-width:680px;max-height:94vh;overflow:auto;border-radius:20px 20px 0 0;padding:0 0 24px;border-top:1px solid var(--line)}
   .sheet .sh-top{position:sticky;top:0;background:var(--bg);padding:14px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);z-index:2}
@@ -161,7 +161,7 @@
   .segwrap button.on{color:#fff}
   #reader{width:100%;border-radius:12px;overflow:hidden;background:#000;min-height:250px}
   .qrbox{display:grid;place-items:center;padding:14px;background:#fff;border-radius:12px}
-  #map{height:62vh;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:var(--surface2)}
+  #map{height:62vh;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:var(--surface2);isolation:isolate}
   .jobrow{cursor:pointer;padding:15px;margin-bottom:11px}
   .jobrow .jt{font-family:var(--serif);font-size:21px;font-weight:700}
   .jobrow .jsub{font-family:var(--mono);font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
@@ -174,7 +174,7 @@
   .backbtn svg{width:16px;height:16px}
   .checkrow{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line)}
   .checkrow input[type=checkbox]{width:22px;height:22px}
-  .toast{position:fixed;bottom:calc(96px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--surface2);color:var(--ink);padding:12px 18px;border-radius:12px;font-weight:600;font-size:14px;z-index:80;box-shadow:0 8px 24px rgba(0,0,0,.5);opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%;text-align:center;border:1px solid var(--line);font-family:var(--mono)}
+  .toast{position:fixed;bottom:calc(96px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--surface2);color:var(--ink);padding:12px 18px;border-radius:12px;font-weight:600;font-size:14px;z-index:2200;box-shadow:0 8px 24px rgba(0,0,0,.5);opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%;text-align:center;border:1px solid var(--line);font-family:var(--mono)}
   .toast.on{opacity:1}
   a{color:var(--accent)}
   .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
@@ -185,7 +185,7 @@
   .photostrip .ph{position:relative;width:66px;height:66px;border-radius:9px;overflow:hidden;border:1px solid var(--line)}
   .photostrip img{width:100%;height:100%;object-fit:cover;cursor:pointer;display:block}
   .photostrip .rm{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;line-height:1;cursor:pointer;padding:0}
-  #photoOverlay{position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;padding:20px}
+  #photoOverlay{position:fixed;inset:0;z-index:2100;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;padding:20px}
   #photoOverlay.on{display:flex}
   #photoOverlay img{max-width:96%;max-height:92%;border-radius:12px}
   .evrow{display:flex;gap:11px;padding:11px 0;border-bottom:1px solid var(--line)}
@@ -193,7 +193,7 @@
   .evrow .ei svg{width:16px;height:16px;color:var(--ink2)}
   .evrow .et{flex:1;min-width:0}
   .evrow .ett{font-size:14px} .evrow .etm{font-family:var(--mono);font-size:11px;color:var(--ink2);margin-top:2px}
-  #authgate{position:fixed;inset:0;z-index:100;background:var(--bg);display:none;align-items:center;justify-content:center;padding:24px}
+  #authgate{position:fixed;inset:0;z-index:3000;background:var(--bg);display:none;align-items:center;justify-content:center;padding:24px}
   #authgate .au-card{width:100%;max-width:340px;text-align:center}
   #authgate .au-logo{width:56px;height:56px;border-radius:15px;background:var(--accent);display:grid;place-items:center;margin:0 auto 14px}
   #authgate .au-logo svg{width:32px;height:32px;color:#fff}
@@ -554,7 +554,7 @@ function handleCode(code){code=String(code||'').trim();if(!code){toast('Enter a 
     else{sheet('Move onto job?',`<div class="banner">📦 <b>#${esc(ex.tagId)}</b> is at <b>${esc(ex.locationType==='transit'?'in transit':locName(ex.locationType,ex.locationId))}</b>.</div><p>Move onto <b>${esc(s.name)}</b>?</p><button class="btn primary block" onclick="doMove('${ex.id}','show','${s.id}')">Move here</button><button class="btn ghost block" style="margin-top:10px" onclick="openUnit('${ex.id}')">Just open it</button>`);}}
   else editUnit(null,code);}
 /* ===== GPS ===== */
-let lastGPS=null;
+let lastGPS=null,formGps=null;
 function captureGPS(cb){if(!navigator.geolocation){if(cb)cb(null);return;}navigator.geolocation.getCurrentPosition(p=>{lastGPS={lat:+p.coords.latitude.toFixed(6),lng:+p.coords.longitude.toFixed(6),acc:Math.round(p.coords.accuracy)};if(cb)cb(lastGPS);},()=>{if(cb)cb(null);},{enableHighAccuracy:true,timeout:8000,maximumAge:60000});}
 function gpsLink(g){if(!g)return '';return `<a href="https://www.google.com/maps?q=${g.lat},${g.lng}" target="_blank" rel="noopener noreferrer">📍 ${g.lat}, ${g.lng} (±${g.acc}m)</a>`;}
 /* ===== PHOTOS ===== */
@@ -601,7 +601,8 @@ function saveJobMeta(unitId,sid){const u=unitById(unitId);if(!u)return;u.jobMeta
 function capturePlacement(unitId){const u=unitById(unitId);if(!u)return;requireTech(()=>{toast('Getting location…');captureGPS(g=>{if(!g){toast('Location unavailable — allow location on your phone');return;}S.movements.push({id:uid('mv'),unitId,fromType:u.locationType,fromId:u.locationId,toType:u.locationType,toId:u.locationId,techName:S.settings.techName,timestamp:now(),gps:g});u.updatedAt=now();save();renderUnit(unitId);toast('Placement captured (±'+g.acc+'m)');});});}
 /* ===== FORMS ===== */
 let segType='small';
-function editUnit(id,prefillTag){const u=id?unitById(id):{};const isNew=!id;
+function setFormGps(){const st=$('#f_gpsStatus');if(st)st.textContent='Getting location…';captureGPS(g=>{if(!g){if(st)st.textContent='Unavailable — allow location access';toast('Location unavailable — allow location on your phone');return;}formGps=g;if(st)st.textContent='✓ Set — '+g.lat+', '+g.lng+' (±'+g.acc+'m)';toast('Location set (±'+g.acc+'m)');});}
+function editUnit(id,prefillTag){const u=id?unitById(id):{};const isNew=!id;formGps=null;const _eg=id?unitGps(u):null;const gpsStat=_eg?('📍 '+_eg.lat+', '+_eg.lng):'No pin yet';
   const locOpts=[...S.shows.map(s=>`<option value="show:${s.id}" ${(currentShow()&&currentShow().id===s.id)?'selected':''}>${esc(s.name)}</option>`),...S.shops.map(s=>`<option value="shop:${s.id}">${esc(s.name)}</option>`)].join('');
   sheet(isNew?'Add asset':'Edit asset',`${isNew&&prefillTag?`<div class="banner">🆕 New code <b>${esc(prefillTag)}</b> — fill in once; linked to this sticker forever.</div>`:''}
     <label class="fld"><span class="lb">Type</span><div class="segwrap" id="t_seg"><button type="button" data-v="small" class="${(u.klass!=='big')?'on':''}" style="${u.klass!=='big'?'background:var(--accent);color:#fff':''}" onclick="tseg(this)">Small iron</button><button type="button" data-v="big" class="${u.klass==='big'?'on':''}" style="${u.klass==='big'?'background:var(--accent);color:#fff':''}" onclick="tseg(this)">Big iron</button></div></label>
@@ -614,6 +615,7 @@ function editUnit(id,prefillTag){const u=id?unitById(id):{};const isNew=!id;
     <hr class="sep"/><div class="grid2"><label class="fld"><span class="lb">Current hrs</span><input id="f_hours" type="number" value="${esc(u.currentHours!=null?u.currentHours:'')}"/></label><label class="fld"><span class="lb">Service due at (hrs)</span><input id="f_svc" type="number" value="${esc(u.serviceDueHours!=null?u.serviceDueHours:'')}" placeholder="from sticker"/></label></div>
     <label class="fld"><span class="lb">Placement (this job)</span><input id="f_area" value="${esc(id?(jm(u,(u.locationType==='show'&&u.locationId)?u.locationId:S.currentShowId).area||''):'')}" placeholder="e.g. VIP South, Production"/></label>
     ${isNew?`<label class="fld"><span class="lb">Location</span><select id="f_loc">${locOpts}</select></label>`:''}
+    <div class="card" style="padding:12px;margin:2px 0 10px"><div class="between"><span class="lb">Location pin (GPS)</span><span id="f_gpsStatus" class="muted" style="font-size:12px">${gpsStat}</span></div><button type="button" class="btn dark block" style="margin-top:9px" onclick="setFormGps()">📍 Set to my current location</button><p class="muted" style="font-size:11px;margin-top:7px">Drops a pin where you're standing. You can fine-tune it later on the map.</p></div>
     <label class="fld"><span class="lb">Notes</span><textarea id="f_notes">${esc(u.notes||'')}</textarea></label>
     <button class="btn primary block" onclick="saveUnit('${id||''}')">${isNew?'Add asset':'Save'}</button>${!isNew?`<button class="btn ghost block" style="margin-top:9px" onclick="confirmDeleteUnit('${id}')">Delete unit</button>`:''}`,stopScanner);
   segType=u.klass==='big'?'big':'small';}
@@ -623,8 +625,8 @@ function saveUnit(id){let tag=$('#f_tag').value.trim();if(!tag)tag=$('#f_serial'
     u.tagId=tag;u.klass=segType;u.serial=$('#f_serial').value.trim();u.weightLbs=num($('#f_weight').value);u.make=$('#f_make').value.trim();u.model=$('#f_model').value.trim();u.kw=num($('#f_kw').value);u.breakerSize=$('#f_breaker').value.trim();
     if(segType==='big'){u.config=$('#f_config')?$('#f_config').value:'';u.trailer=$('#f_trailer')?$('#f_trailer').value.trim():'';}
     u.fuelType=$('#f_fuel').value.trim();u.tankGallons=num($('#f_tank').value);u.currentHours=num($('#f_hours').value);u.serviceDueHours=num($('#f_svc').value);const _psid=(u.locationType==='show'&&u.locationId)?u.locationId:S.currentShowId;if(_psid){u.jobMeta=u.jobMeta||{};u.jobMeta[_psid]=Object.assign({},u.jobMeta[_psid],{area:$('#f_area').value.trim()});}u.notes=$('#f_notes').value.trim();u.updatedAt=now();
-    if(isNew){const lv=($('#f_loc')&&$('#f_loc').value)||('show:'+(S.currentShowId||''));const[lt,lid]=lv.split(':');u.locationType=lt;u.locationId=lid;captureGPS(g=>{S.movements.push({id:uid('mv'),unitId:u.id,fromType:null,fromId:null,toType:lt,toId:lid,techName:S.settings.techName,timestamp:now(),gps:g});save();closeSheet();openUnit(u.id);toast('Added');});}
-    else{save();closeSheet();openUnit(u.id);toast('Saved');}});}
+    if(isNew){const lv=($('#f_loc')&&$('#f_loc').value)||('show:'+(S.currentShowId||''));const[lt,lid]=lv.split(':');u.locationType=lt;u.locationId=lid;const _push=g=>{S.movements.push({id:uid('mv'),unitId:u.id,fromType:null,fromId:null,toType:lt,toId:lid,techName:S.settings.techName,timestamp:now(),gps:g||null});save();closeSheet();openUnit(u.id);toast(g?'Added · location pinned':'Added — no pin yet (set location later)');};if(formGps)_push(formGps);else captureGPS(_push);}
+    else{if(formGps){S.movements.push({id:uid('mv'),unitId:u.id,fromType:u.locationType,fromId:u.locationId,toType:u.locationType,toId:u.locationId,techName:S.settings.techName,timestamp:now(),gps:formGps});}save();closeSheet();openUnit(u.id);toast(formGps?'Saved · location pinned':'Saved');}});}
 function confirmDeleteUnit(id){if(!confirm('Delete this unit and its logs?'))return;S.units=S.units.filter(u=>u.id!==id);S.reports=S.reports.filter(r=>r.unitId!==id);S.issues=S.issues.filter(i=>i.unitId!==id);S.movements=S.movements.filter(m=>m.unitId!==id);save();closeSheet();render();toast('Deleted');}
 let vsegVal='running';
 function logVitals(unitId){const u=unitById(unitId);requireTech(()=>{sheet('Log check — #'+esc(u.tagId),`<p class="muted" style="margin-top:0">Stamped with <b>${esc(S.settings.techName)}</b> + time. Leave blank what you didn't read.</p><div class="grid2"><label class="fld"><span class="lb">Volt L-L</span><input id="v_ll" type="number"/></label><label class="fld"><span class="lb">Volt L-N</span><input id="v_ln" type="number"/></label></div><div class="grid3"><label class="fld"><span class="lb">Amps L1</span><input id="v_a1" type="number"/></label><label class="fld"><span class="lb">Amps L2</span><input id="v_a2" type="number"/></label><label class="fld"><span class="lb">Amps L3</span><input id="v_a3" type="number"/></label></div><div class="grid3"><label class="fld"><span class="lb">Hz</span><input id="v_hz" type="number"/></label><label class="fld"><span class="lb">Load kW</span><input id="v_kw" type="number"/></label><label class="fld"><span class="lb">Load %</span><input id="v_lp" type="number"/></label></div><div class="grid3"><label class="fld"><span class="lb">Coolant temp</span><input id="v_ct" type="number"/></label><label class="fld"><span class="lb">Oil T°</span><input id="v_ot" type="number"/></label><label class="fld"><span class="lb">Oil psi</span><input id="v_op" type="number"/></label></div><div class="grid3"><label class="fld"><span class="lb">Fuel %</span><input id="v_fuel" type="number"/></label><label class="fld"><span class="lb">Batt V</span><input id="v_bat" type="number"/></label><label class="fld"><span class="lb">DEF %</span><input id="v_def" type="number"/></label></div><label class="fld"><span class="lb">Engine hrs (updates service)</span><input id="v_hrs" type="number" value="${u.currentHours!=null?u.currentHours:''}"/></label><label class="fld"><span class="lb">Condition / notes</span><textarea id="v_notes" placeholder="Running clean…"></textarea></label><label class="fld"><span class="lb">Status</span><div class="segwrap" id="v_seg"><button type="button" data-v="running" class="on" style="background:var(--green);color:#fff" onclick="vseg(this)">Running</button><button type="button" data-v="staged" onclick="vseg(this)">Staged</button><button type="button" data-v="down" onclick="vseg(this)">Down</button></div></label><button class="btn primary block" onclick="saveVitals('${unitId}')">Save check</button>`,stopScanner);vsegVal='running';captureGPS();});}
