@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build -->
+<!-- fleetview build 2026-07-25 scanner-live -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -533,13 +533,22 @@ function openReport(id){if(!id){toast('Open a job first');return;}
 function copyReport(){const t=$('#reportBox');t.select();try{navigator.clipboard.writeText(t.value);}catch(e){document.execCommand('copy');}toast('Copied');}
 function emailReport(id){const email=($('#svcEmail')&&$('#svcEmail').value.trim())||'';S.settings.svcEmail=email;save();const s=showById(id);location.href='mailto:'+encodeURIComponent(email)+'?subject='+encodeURIComponent('Generator Report — '+(s?s.name:'')+' — '+new Date().toLocaleDateString())+'&body='+encodeURIComponent($('#reportBox').value);}
 /* ===== SCAN ===== */
-let scanner=null;
+let scanner=null,torchOn=false;
+function scanFormats(){if(typeof Html5QrcodeSupportedFormats==='undefined')return undefined;const F=Html5QrcodeSupportedFormats;return [F.QR_CODE,F.CODE_128,F.CODE_39,F.CODE_93,F.CODABAR,F.ITF,F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.DATA_MATRIX];}
+function scanBox(vw,vh){const w=Math.max(170,Math.min(Math.round((vw||300)*0.9),340));const h=Math.max(130,Math.round(w*0.62));return {width:w,height:Math.min(h,Math.round((vh||260)*0.62))};}
+function setupTorch(){try{const btn=$('#torchBtn');if(!btn||!scanner||!scanner.getRunningTrackCapabilities)return;const caps=scanner.getRunningTrackCapabilities();if(caps&&('torch' in caps)&&caps.torch)btn.style.display='';}catch(e){}}
+function toggleTorch(){try{if(!scanner||!scanner.applyVideoConstraints)return;torchOn=!torchOn;scanner.applyVideoConstraints({advanced:[{torch:torchOn}]});const b=$('#torchBtn');if(b){b.classList.toggle('primary',torchOn);b.textContent=torchOn?'🔦 Light on':'🔦 Light';}}catch(e){}}
 function openScan(){if(!currentShow()){toast('Open a job first');go('jobs');return;}
-  sheet('Add asset',`<p class="muted" style="margin-top:0">Adding to <b>${esc(currentShow().name)}</b>.</p><button class="btn primary block" onclick="stopScanner();editUnit(null,'')">✎ Add manually</button><p class="muted" style="margin:12px 0 6px;text-align:center;font-size:12px">— or scan a QR code (Phase 2) —</p><div id="reader"></div><div id="scanMsg" class="muted" style="text-align:center;margin:10px 0;font-size:13px"></div><hr class="sep"/><label class="fld"><span class="lb">Or type the code / serial</span><div class="row"><input id="manualCode" placeholder="e.g. GEN-00427"/><button class="btn dark" onclick="handleCode(document.getElementById('manualCode').value)">Go</button></div></label>`,stopScanner);
+  sheet('Scan a tag',`<p class="muted" style="margin-top:0">Adding to <b>${esc(currentShow().name)}</b>. Point the camera at the <b>barcode or QR sticker</b> on the unit.</p><div id="reader" style="min-height:220px;border-radius:14px;overflow:hidden;background:rgba(128,128,128,.12)"></div><div id="scanMsg" class="muted" style="text-align:center;margin:10px 0;font-size:13px">Starting camera…</div><button id="torchBtn" class="btn ghost block" style="display:none;margin-bottom:4px" onclick="toggleTorch()">🔦 Light</button><hr class="sep"/><label class="fld"><span class="lb">Or type the code / serial</span><div class="row"><input id="manualCode" placeholder="e.g. 28B10199"/><button class="btn dark" onclick="handleCode(document.getElementById('manualCode').value)">Go</button></div></label><button class="btn ghost block" style="margin-top:10px" onclick="stopScanner();editUnit(null,'')">✎ Add manually instead</button>`,stopScanner);
   startScanner();captureGPS();}
-function startScanner(){const msg=$('#scanMsg');if(typeof Html5Qrcode==='undefined'){msg.innerHTML='Scanner didn\'t load — use the box below.';return;}
-  try{scanner=new Html5Qrcode("reader",{verbose:false});scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:240,height:240}},d=>{if(scanner)scanner.pause(true);handleCode(d);},()=>{}).catch(err=>{msg.innerHTML='Camera unavailable ('+esc(err&&err.name||'blocked')+'). Open the link directly on your phone, or type below.';});}catch(e){msg.innerHTML='Camera couldn\'t start. Type below.';}}
-function stopScanner(){if(scanner){try{scanner.stop().then(()=>{scanner.clear();scanner=null;}).catch(()=>{scanner=null;});}catch(e){scanner=null;}}}
+function startScanner(){const msg=$('#scanMsg');if(!msg)return;if(typeof Html5Qrcode==='undefined'){msg.innerHTML='Scanner didn\'t load — type the code below, or “Add manually”.';return;}
+  const onOk=d=>{try{if(scanner)scanner.pause(true);}catch(e){}if(navigator.vibrate)navigator.vibrate(30);handleCode(d);};
+  const fail=err=>{msg.innerHTML='Camera unavailable ('+esc((err&&err.name)||'blocked')+'). Type the code below, or “Add manually”.';};
+  const startCfg={fps:12,qrbox:scanBox};
+  try{scanner=new Html5Qrcode("reader",{verbose:false,formatsToSupport:scanFormats(),experimentalFeatures:{useBarCodeDetectorIfSupported:true}});
+    scanner.start({facingMode:{ideal:"environment"}},startCfg,onOk,()=>{}).then(()=>{msg.textContent='Point at the barcode or QR — hold steady.';setTimeout(setupTorch,700);}).catch(err=>{try{scanner.start({facingMode:"user"},startCfg,onOk,()=>{}).then(()=>{msg.textContent='Scanning…';setTimeout(setupTorch,700);}).catch(()=>fail(err));}catch(e){fail(err);}});
+  }catch(e){msg.innerHTML='Camera couldn\'t start. Type the code below.';}}
+function stopScanner(){torchOn=false;if(scanner){try{scanner.stop().then(()=>{try{scanner.clear();}catch(e){}scanner=null;}).catch(()=>{scanner=null;});}catch(e){scanner=null;}}}
 function handleCode(code){code=String(code||'').trim();if(!code){toast('Enter a code');return;}stopScanner();const ex=unitByTag(code);const s=currentShow();
   if(ex){if(ex.locationType==='show'&&ex.locationId===s.id){closeSheet();openUnit(ex.id);toast('Already on this job');}
     else{sheet('Move onto job?',`<div class="banner">📦 <b>#${esc(ex.tagId)}</b> is at <b>${esc(ex.locationType==='transit'?'in transit':locName(ex.locationType,ex.locationId))}</b>.</div><p>Move onto <b>${esc(s.name)}</b>?</p><button class="btn primary block" onclick="doMove('${ex.id}','show','${s.id}')">Move here</button><button class="btn ghost block" style="margin-top:10px" onclick="openUnit('${ex.id}')">Just open it</button>`);}}
