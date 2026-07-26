@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-26 recents-dest-chooser -->
+<!-- fleetview build 2026-07-26 map-popup-tidy -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -506,7 +506,17 @@ function drawMap(scopeShowId){const el=$('#map');if(!el)return;const note=$('#ma
     units.forEach(u=>{const g=unitGps(u);const cc=statusHex(computeStatus(u).color);const sid=scopeShowId||((u.locationType==='show')?u.locationId:null);
       const icon=L.divIcon({className:'',html:'<div style="width:16px;height:16px;border-radius:50%;background:'+cc+';border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.3)"></div>',iconSize:[16,16]});
       const m=L.marker([g.lat,g.lng],{icon});if(mapFocusUnit&&u.id===mapFocusUnit)_focusM=m;
-      m.bindPopup('<b>'+esc(assetLabel(u,sid))+'</b><br>'+esc([u.make,u.model].filter(Boolean).join(' ')+(u.serial?(' #'+u.serial):''))+'<br>'+esc(computeStatus(u).label)+' · <a href="#" onclick="openUnit(\''+u.id+'\');return false;">open</a> · <a href="#" onclick="mapSetLoc(\''+u.id+'\');return false;">📍 set my location</a>');
+      const _jd=jm(u,sid);const _area=placeOf(u,sid)||_jd.name||'Unplaced';const _sub=[(u.model||u.make||''),(u.serial?('#'+u.serial):'')].filter(Boolean).join(' · ');
+      m.bindPopup('<div style="min-width:174px;font-family:system-ui,sans-serif;color:#241d15">'
+        +'<div style="font-weight:800;font-size:15px;line-height:1.2">'+esc(_area)+'</div>'
+        +(_sub?'<div style="font-size:12px;color:#7a6f60;margin-top:1px">'+esc(_sub)+'</div>':'')
+        +'<div style="font-size:12.5px;margin:7px 0 9px;font-weight:600"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+cc+';margin-right:6px;vertical-align:middle"></span>'+esc(computeStatus(u).label)+'</div>'
+        +'<div style="display:flex;gap:6px;margin-bottom:6px">'
+        +'<a href="#" onclick="openUnit(\''+u.id+'\');return false;" style="flex:1;text-align:center;background:#c77455;color:#fff;padding:7px 4px;border-radius:8px;font-size:12.5px;font-weight:700;text-decoration:none">Open</a>'
+        +'<a href="#" onclick="openPinEditor(\''+u.id+'\');return false;" style="flex:1;text-align:center;background:#ece6dd;color:#241d15;padding:7px 4px;border-radius:8px;font-size:12.5px;font-weight:700;text-decoration:none">Move</a>'
+        +'</div>'
+        +'<a href="#" onclick="mapSetLoc(\''+u.id+'\');return false;" style="display:block;text-align:center;background:#ece6dd;color:#241d15;padding:7px 4px;border-radius:8px;font-size:12.5px;font-weight:700;text-decoration:none">📍 Set to my location</a>'
+        +'</div>');
       pts.push([g.lat,g.lng]);if(layer)layer.addLayer(m);else m.addTo(mapObj);});
     if(layer)mapObj.addLayer(layer);
     if(units.length)mapObj.fitBounds(pts,{padding:[40,40],maxZoom:16});
