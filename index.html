@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-26 loadpct-in-table -->
+<!-- fleetview build 2026-07-26 no-swipe-delete -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -84,7 +84,7 @@
   .unit{display:flex;gap:0;margin-bottom:11px;overflow:hidden;cursor:pointer}
   .swipe-wrap{position:relative;overflow:hidden;border-radius:14px;margin-bottom:11px}
   .swipe-actions{position:absolute;top:0;right:0;bottom:0;display:flex;z-index:0}
-  .swipe-act{border:none;color:#fff;font-weight:700;font-size:12px;width:76px;display:grid;place-items:center;cursor:pointer;font-family:var(--mono);letter-spacing:.3px}
+  .swipe-act{border:none;color:#fff;font-weight:700;font-size:13px;width:120px;display:grid;place-items:center;cursor:pointer;font-family:var(--mono);letter-spacing:.3px}
   .swipe-act.off{background:var(--blue)}
   .swipe-act.del{background:var(--red)}
   .swipe-card{position:relative;z-index:1;transition:transform .2s ease;will-change:transform;touch-action:pan-y}
@@ -418,7 +418,7 @@ function unitCard(u,sid){
   else if(u.locationType==='transit')line2=`<div class="uloc transit">${IC.truck}<span>${esc(u.trailer?('Trailer '+u.trailer):'In transit')} → ${esc(locName('show',u.inTransitToShowId))}</span></div>`;
   else line2=`<div class="uloc">${IC.pin}<span>${esc(pl||locName(u.locationType,u.locationId))}</span></div>`;
   const stale=isStale(u);const np=(u.photos?u.photos.length:0)+oi.reduce((n,i)=>n+((i.photos&&i.photos.length)||0),0);
-  return `<div class="swipe-wrap"><div class="swipe-actions"><button class="swipe-act off" onclick="event.stopPropagation();closeSwipe(this);moveMenu('${u.id}')">Off job</button><button class="swipe-act del" onclick="event.stopPropagation();confirmDeleteUnit('${u.id}')">Delete</button></div><div class="card unit swipe-card" onpointerdown="swStart(event,this)" onpointermove="swMove(event,this)" onpointerup="swEnd(event,this,'${u.id}')" onpointercancel="swCancel(this)"><div class="stripe" style="background:${SC[cs.color]}"></div><div class="body">
+  return `<div class="swipe-wrap"><div class="swipe-actions"><button class="swipe-act off" onclick="event.stopPropagation();closeSwipe(this);moveMenu('${u.id}')">Off job</button></div><div class="card unit swipe-card" onpointerdown="swStart(event,this)" onpointermove="swMove(event,this)" onpointerup="swEnd(event,this,'${u.id}')" onpointercancel="swCancel(this)"><div class="stripe" style="background:${SC[cs.color]}"></div><div class="body">
     <div class="l1"><span class="tag">${esc(title)}</span>${statusPill(cs)}</div>
     <div style="font-size:12px;color:var(--ink2);margin-top:1px">${esc(subtitle||'—')}</div>
     ${line2}${fuelBar(u)}
@@ -427,11 +427,11 @@ function unitCard(u,sid){
 }
 /* ===== SWIPE-TO-REVEAL (job asset cards) ===== */
 let _swEl=null,_swX=0,_swY=0,_swBase=0,_swDx=0,_swDir=null;
-function swStart(e,el){_swEl=el;_swX=e.clientX;_swY=e.clientY;_swBase=el.classList.contains('open')?-152:0;_swDx=_swBase;_swDir=null;el.style.transition='none';try{el.setPointerCapture(e.pointerId);}catch(_){}}
+function swStart(e,el){_swEl=el;_swX=e.clientX;_swY=e.clientY;_swBase=el.classList.contains('open')?-120:0;_swDx=_swBase;_swDir=null;el.style.transition='none';try{el.setPointerCapture(e.pointerId);}catch(_){}}
 function swMove(e,el){if(_swEl!==el)return;const dx=e.clientX-_swX,dy=e.clientY-_swY;if(_swDir===null){if(Math.abs(dx)<4&&Math.abs(dy)<4)return;_swDir=Math.abs(dx)>Math.abs(dy)?'h':'v';if(_swDir==='v'){el.style.transition='transform .2s';el.style.transform='translateX('+_swBase+'px)';_swEl=null;return;}}
-  let nx=_swBase+dx;nx=Math.max(-160,Math.min(0,nx));_swDx=nx;el.style.transform='translateX('+nx+'px)';if(e.cancelable)e.preventDefault();}
-function swEnd(e,el,unitId){if(_swEl!==el)return;_swEl=null;el.style.transition='transform .2s';const dragged=Math.abs(_swDx-_swBase)>8;if(!dragged){const wasOpen=_swBase<0;el.style.transform='translateX(0)';el.classList.remove('open');if(!wasOpen)openUnit(unitId);return;}const openIt=_swDx<-76;el.style.transform='translateX('+(openIt?-152:0)+'px)';el.classList.toggle('open',openIt);}
-function swCancel(el){el.style.transition='transform .2s';el.style.transform='translateX('+(el.classList.contains('open')?-152:0)+'px)';if(_swEl===el)_swEl=null;}
+  let nx=_swBase+dx;nx=Math.max(-130,Math.min(0,nx));_swDx=nx;el.style.transform='translateX('+nx+'px)';if(e.cancelable)e.preventDefault();}
+function swEnd(e,el,unitId){if(_swEl!==el)return;_swEl=null;el.style.transition='transform .2s';const dragged=Math.abs(_swDx-_swBase)>8;if(!dragged){const wasOpen=_swBase<0;el.style.transform='translateX(0)';el.classList.remove('open');if(!wasOpen)openUnit(unitId);return;}const openIt=_swDx<-60;el.style.transform='translateX('+(openIt?-120:0)+'px)';el.classList.toggle('open',openIt);}
+function swCancel(el){el.style.transition='transform .2s';el.style.transform='translateX('+(el.classList.contains('open')?-120:0)+'px)';if(_swEl===el)_swEl=null;}
 function closeSwipe(btn){const w=btn.closest('.swipe-wrap');if(!w)return;const c=w.querySelector('.swipe-card');if(c){c.style.transition='transform .2s';c.style.transform='translateX(0)';c.classList.remove('open');}}
 /* ===== FILTERS ===== */
 function passFilter(u,f){if(f==='all')return true;if(f==='big')return u.klass==='big';if(f==='small')return u.klass!=='big';if(f==='down')return computeStatus(u).color==='red';if(f==='lowfuel'){const x=latestFuel(u);return x!=null&&x<20;}if(f==='service'){const s=serviceState(u).state;return s==='over'||s==='soon';}return true;}
