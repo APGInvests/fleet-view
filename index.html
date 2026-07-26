@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-26 no-swipe-delete -->
+<!-- fleetview build 2026-07-26 move-quickadd+alert-map -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -86,6 +86,7 @@
   .swipe-actions{position:absolute;top:0;right:0;bottom:0;display:flex;z-index:0}
   .swipe-act{border:none;color:#fff;font-weight:700;font-size:13px;width:120px;display:grid;place-items:center;cursor:pointer;font-family:var(--mono);letter-spacing:.3px}
   .swipe-act.off{background:var(--blue)}
+  .swipe-maphint{position:absolute;left:0;top:0;bottom:0;width:120px;display:grid;place-items:center;background:var(--green);color:#fff;font-family:var(--mono);font-weight:700;font-size:13px;z-index:0}
   .swipe-act.del{background:var(--red)}
   .swipe-card{position:relative;z-index:1;transition:transform .2s ease;will-change:transform;touch-action:pan-y}
   .swipe-card.unit{margin-bottom:0}
@@ -418,7 +419,7 @@ function unitCard(u,sid){
   else if(u.locationType==='transit')line2=`<div class="uloc transit">${IC.truck}<span>${esc(u.trailer?('Trailer '+u.trailer):'In transit')} → ${esc(locName('show',u.inTransitToShowId))}</span></div>`;
   else line2=`<div class="uloc">${IC.pin}<span>${esc(pl||locName(u.locationType,u.locationId))}</span></div>`;
   const stale=isStale(u);const np=(u.photos?u.photos.length:0)+oi.reduce((n,i)=>n+((i.photos&&i.photos.length)||0),0);
-  return `<div class="swipe-wrap"><div class="swipe-actions"><button class="swipe-act off" onclick="event.stopPropagation();closeSwipe(this);moveMenu('${u.id}')">Off job</button></div><div class="card unit swipe-card" onpointerdown="swStart(event,this)" onpointermove="swMove(event,this)" onpointerup="swEnd(event,this,'${u.id}')" onpointercancel="swCancel(this)"><div class="stripe" style="background:${SC[cs.color]}"></div><div class="body">
+  return `<div class="swipe-wrap"><div class="swipe-maphint">🗺 Map</div><div class="swipe-actions"><button class="swipe-act off" onclick="event.stopPropagation();closeSwipe(this);moveMenu('${u.id}')">Off job</button></div><div class="card unit swipe-card" onpointerdown="swStart(event,this)" onpointermove="swMove(event,this)" onpointerup="swEnd(event,this,'${u.id}')" onpointercancel="swCancel(this)"><div class="stripe" style="background:${SC[cs.color]}"></div><div class="body">
     <div class="l1"><span class="tag">${esc(title)}</span>${statusPill(cs)}</div>
     <div style="font-size:12px;color:var(--ink2);margin-top:1px">${esc(subtitle||'—')}</div>
     ${line2}${fuelBar(u)}
@@ -429,8 +430,8 @@ function unitCard(u,sid){
 let _swEl=null,_swX=0,_swY=0,_swBase=0,_swDx=0,_swDir=null;
 function swStart(e,el){_swEl=el;_swX=e.clientX;_swY=e.clientY;_swBase=el.classList.contains('open')?-120:0;_swDx=_swBase;_swDir=null;el.style.transition='none';try{el.setPointerCapture(e.pointerId);}catch(_){}}
 function swMove(e,el){if(_swEl!==el)return;const dx=e.clientX-_swX,dy=e.clientY-_swY;if(_swDir===null){if(Math.abs(dx)<4&&Math.abs(dy)<4)return;_swDir=Math.abs(dx)>Math.abs(dy)?'h':'v';if(_swDir==='v'){el.style.transition='transform .2s';el.style.transform='translateX('+_swBase+'px)';_swEl=null;return;}}
-  let nx=_swBase+dx;nx=Math.max(-130,Math.min(0,nx));_swDx=nx;el.style.transform='translateX('+nx+'px)';if(e.cancelable)e.preventDefault();}
-function swEnd(e,el,unitId){if(_swEl!==el)return;_swEl=null;el.style.transition='transform .2s';const dragged=Math.abs(_swDx-_swBase)>8;if(!dragged){const wasOpen=_swBase<0;el.style.transform='translateX(0)';el.classList.remove('open');if(!wasOpen)openUnit(unitId);return;}const openIt=_swDx<-60;el.style.transform='translateX('+(openIt?-120:0)+'px)';el.classList.toggle('open',openIt);}
+  let nx=_swBase+dx;nx=Math.max(-130,Math.min(120,nx));_swDx=nx;el.style.transform='translateX('+nx+'px)';if(e.cancelable)e.preventDefault();}
+function swEnd(e,el,unitId){if(_swEl!==el)return;_swEl=null;el.style.transition='transform .2s';const dragged=Math.abs(_swDx-_swBase)>8;if(!dragged){const wasOpen=_swBase<0;el.style.transform='translateX(0)';el.classList.remove('open');if(!wasOpen)openUnit(unitId);return;}if(_swDx>=60){el.style.transform='translateX(0)';el.classList.remove('open');showUnitOnMap(unitId);return;}const openIt=_swDx<=-60;el.style.transform='translateX('+(openIt?-120:0)+'px)';el.classList.toggle('open',openIt);}
 function swCancel(el){el.style.transition='transform .2s';el.style.transform='translateX('+(el.classList.contains('open')?-120:0)+'px)';if(_swEl===el)_swEl=null;}
 function closeSwipe(btn){const w=btn.closest('.swipe-wrap');if(!w)return;const c=w.querySelector('.swipe-card');if(c){c.style.transition='transform .2s';c.style.transform='translateX(0)';c.classList.remove('open');}}
 /* ===== FILTERS ===== */
@@ -487,10 +488,11 @@ function renderFleet(){let list=S.units.slice();
 }
 function rerenderFleet(){const v=$('#view');const sc=v.querySelector('.searchbar input');const pos=sc?sc.selectionStart:null;v.innerHTML=renderFleet();const ni=v.querySelector('.searchbar input');if(ni){ni.focus();if(pos!=null)try{ni.setSelectionRange(pos,pos);}catch(e){}}}
 /* ===== MAP ===== */
-let mapObj=null,mapScope='job';
+let mapObj=null,mapScope='job',mapFocusUnit=null;
 function statusHex(c){return {green:'#2fa96a',orange:'#e2823f',red:'#dc5142',yellow:'#e0b23f',grey:'#8a8175',blue:'#2f7bde'}[c]||'#c77455';}
 function renderMapScreen(){const s=currentShow();const toggle=s?`<div class="filterbar" style="margin-bottom:12px"><button class="fchip ${mapScope==='job'?'on':''}" onclick="mapScope='job';render()">This job</button><button class="fchip ${mapScope==='all'?'on':''}" onclick="mapScope='all';render()">All locations</button></div>`:'';return `<div class="between"><h2 class="section" style="margin:0">Map</h2>${s&&mapScope==='job'?`<span class="muted" style="font-family:var(--mono);font-size:11px">${esc(s.name)}</span>`:''}</div>${toggle}<div id="map"></div><p class="muted" id="mapNote" style="font-size:12px;margin-top:8px"></p>`;}
-function drawMap(scopeShowId){const el=$('#map');if(!el)return;const note=$('#mapNote');
+function showUnitOnMap(unitId){const u=unitById(unitId);if(!u)return;if(!unitGps(u)){toast('No map pin for this one yet');openUnit(unitId);return;}mapFocusUnit=unitId;if(u.locationType==='show'&&u.locationId){S.currentShowId=u.locationId;mapScope='job';}else{mapScope='all';}const ov=$('#overlay');if(ov)ov.classList.remove('on');go('map');}
+function drawMap(scopeShowId){const el=$('#map');if(!el)return;const note=$('#mapNote');let _focusM=null;
   let units=S.units.filter(u=>unitGps(u));if(scopeShowId)units=units.filter(u=>u.locationType==='show'&&u.locationId===scopeShowId);
   const site=scopeShowId?((showById(scopeShowId)||{}).site):null;
   if(typeof L==='undefined'){el.innerHTML='<div class="empty" style="padding:40px"><p class="muted">Map library did not load.</p></div>';if(note)note.textContent='';return;}
@@ -503,12 +505,13 @@ function drawMap(scopeShowId){const el=$('#map');if(!el)return;const note=$('#ma
     const useCl=(typeof L.markerClusterGroup==='function');const layer=useCl?L.markerClusterGroup({maxClusterRadius:45,showCoverageOnHover:false,spiderfyDistanceMultiplier:1.6}):null;
     units.forEach(u=>{const g=unitGps(u);const cc=statusHex(computeStatus(u).color);const sid=scopeShowId||((u.locationType==='show')?u.locationId:null);
       const icon=L.divIcon({className:'',html:'<div style="width:16px;height:16px;border-radius:50%;background:'+cc+';border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.3)"></div>',iconSize:[16,16]});
-      const m=L.marker([g.lat,g.lng],{icon});
+      const m=L.marker([g.lat,g.lng],{icon});if(mapFocusUnit&&u.id===mapFocusUnit)_focusM=m;
       m.bindPopup('<b>'+esc(assetLabel(u,sid))+'</b><br>'+esc([u.make,u.model].filter(Boolean).join(' ')+(u.serial?(' #'+u.serial):''))+'<br>'+esc(computeStatus(u).label)+' · <a href="#" onclick="openUnit(\''+u.id+'\');return false;">open</a> · <a href="#" onclick="mapSetLoc(\''+u.id+'\');return false;">📍 set my location</a>');
       pts.push([g.lat,g.lng]);if(layer)layer.addLayer(m);else m.addTo(mapObj);});
     if(layer)mapObj.addLayer(layer);
     if(units.length)mapObj.fitBounds(pts,{padding:[40,40],maxZoom:16});
     else mapObj.setView([site.lat,site.lng],site.zoom||15);
+    if(_focusM){const fm=_focusM;mapFocusUnit=null;setTimeout(()=>{try{if(layer&&layer.zoomToShowLayer){layer.zoomToShowLayer(fm,()=>fm.openPopup());}else{mapObj.setView(fm.getLatLng(),18);fm.openPopup();}}catch(e){}},220);}
     if(note)note.textContent=(units.length?(units.length+' unit(s)'+(useCl?' — piles group together; tap a cluster to spread them out. ':'. ')):(site?'Centered on the venue. ':''))+'Tiles blank? Open the link directly on your phone.';
   }catch(e){el.innerHTML='<div class="empty" style="padding:40px"><p class="muted">Map did not render here. It works when opened directly on a phone.</p></div>';}
 }
@@ -607,7 +610,11 @@ function bigIssuePhoto(iid,i){const is=S.issues.find(x=>x.id===iid);if(is&&is.ph
 function doMove(unitId,type,id){const u=unitById(unitId);if(!u)return;requireTech(()=>{captureGPS(g=>{const from={type:u.locationType,id:u.locationId};u.locationType=type;u.locationId=id;u.inTransitToShowId=null;u.updatedAt=now();S.movements.push({id:uid('mv'),unitId,fromType:from.type,fromId:from.id,toType:type,toId:id,techName:S.settings.techName,timestamp:now(),gps:g||lastGPS});save();closeSheet();openUnit(unitId);toast('Moved to '+locName(type,id));});});}
 function shipTo(unitId){const u=unitById(unitId);if(!u)return;sheet('Mark en route',`<p class="muted" style="margin-top:0">Marks in transit until scanned in on arrival.</p><label class="fld"><span class="lb">Destination show</span><select id="shipTo">${S.shows.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label><button class="btn primary block" onclick="doShip('${unitId}')">Mark en route</button>`);}
 function doShip(unitId){const u=unitById(unitId);const dest=$('#shipTo').value;requireTech(()=>{captureGPS(g=>{const from={type:u.locationType,id:u.locationId};u.locationType='transit';u.inTransitToShowId=dest;u.locationId=null;u.updatedAt=now();S.movements.push({id:uid('mv'),unitId,fromType:from.type,fromId:from.id,toType:'transit',toId:dest,techName:S.settings.techName,timestamp:now(),gps:g});save();closeSheet();openUnit(unitId);toast('Marked en route');});});}
-function moveMenu(unitId){const shows=S.shows.map(s=>`<button class="btn ghost block" style="margin-bottom:8px" onclick="doMove('${unitId}','show','${s.id}')">${esc(s.name)}</button>`).join('');const shops=S.shops.map(s=>`<button class="btn ghost block" style="margin-bottom:8px" onclick="doMove('${unitId}','shop','${s.id}')">${esc(s.name)}</button>`).join('');sheet('Move / scan into…',`<div class="lb" style="margin-bottom:6px">JOBS</div>${shows||'<p class="muted">No jobs</p>'}<hr class="sep"/><div class="lb" style="margin-bottom:6px">SHOPS</div>${shops}`);}
+function quickAddJob(unitId){sheet('New job',`<label class="fld"><span class="lb">Job / show name</span><input id="qj_name" placeholder="e.g. Lollapalooza 2026"/></label><label class="fld"><span class="lb">Location (optional)</span><input id="qj_loc" placeholder="City / venue"/></label><button class="btn primary block" onclick="doQuickAddJob('${unitId||''}')">Create &amp; move here</button><p class="muted" style="font-size:11px;margin-top:8px">Creates the job and drops this unit on it. You can set the venue pin later from the job.</p>`);setTimeout(()=>{const el=$('#qj_name');if(el)el.focus();},120);}
+function doQuickAddJob(unitId){const nm=($('#qj_name').value||'').trim();if(!nm){toast('Enter a job name');return;}const id=uid('show');S.shows.push({id,createdAt:now(),name:nm,location:($('#qj_loc').value||'').trim(),startDate:null,site:null});S.currentShowId=id;save();if(unitId)doMove(unitId,'show',id);else{closeSheet();openJob(id);}}
+function quickAddShop(unitId){sheet('New shop',`<label class="fld"><span class="lb">Shop name</span><input id="qs_name" placeholder="e.g. Dallas Yard"/></label><button class="btn primary block" onclick="doQuickAddShop('${unitId||''}')">Create &amp; move here</button>`);setTimeout(()=>{const el=$('#qs_name');if(el)el.focus();},120);}
+function doQuickAddShop(unitId){const nm=($('#qs_name').value||'').trim();if(!nm){toast('Enter a shop name');return;}const id=uid('shop');S.shops.push({id,name:nm});save();if(unitId)doMove(unitId,'shop',id);else{closeSheet();render();}}
+function moveMenu(unitId){const shows=S.shows.map(s=>`<button class="btn ghost block" style="margin-bottom:8px" onclick="doMove('${unitId}','show','${s.id}')">${esc(s.name)}</button>`).join('');const shops=S.shops.map(s=>`<button class="btn ghost block" style="margin-bottom:8px" onclick="doMove('${unitId}','shop','${s.id}')">${esc(s.name)}</button>`).join('');sheet('Move / scan into…',`<div class="lb" style="margin-bottom:6px">JOBS</div>${shows}<button class="btn dark block" style="margin-bottom:8px" onclick="quickAddJob('${unitId}')">+ New job</button><hr class="sep"/><div class="lb" style="margin-bottom:6px">SHOPS</div>${shops}<button class="btn dark block" style="margin-top:2px" onclick="quickAddShop('${unitId}')">+ New shop</button>`);}
 /* ===== UNIT DETAIL ===== */
 let detailTab='vitals';
 function openUnit(id){detailTab='vitals';renderUnit(id);}
