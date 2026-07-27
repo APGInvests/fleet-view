@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-26 map-popup-tidy -->
+<!-- fleetview build 2026-07-27 job-swipe-delete -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -89,7 +89,7 @@
   .swipe-maphint{position:absolute;left:0;top:0;bottom:0;width:120px;display:grid;place-items:center;background:var(--green);color:#fff;font-family:var(--mono);font-weight:700;font-size:13px;z-index:0}
   .swipe-act.del{background:var(--red)}
   .swipe-card{position:relative;z-index:1;transition:transform .2s ease;will-change:transform;touch-action:pan-y}
-  .swipe-card.unit{margin-bottom:0}
+  .swipe-card.unit,.swipe-card.jobrow{margin-bottom:0}
   .unit .stripe{width:8px;flex:0 0 8px}
   .unit .body{flex:1;padding:12px 14px;min-width:0}
   .unit .body .l1{display:flex;align-items:center;gap:8px}
@@ -428,12 +428,14 @@ function unitCard(u,sid){
 }
 /* ===== SWIPE-TO-REVEAL (job asset cards) ===== */
 let _swEl=null,_swX=0,_swY=0,_swBase=0,_swDx=0,_swDir=null;
-function swStart(e,el){_swEl=el;_swX=e.clientX;_swY=e.clientY;_swBase=el.classList.contains('open')?-120:0;_swDx=_swBase;_swDir=null;el.style.transition='none';try{el.setPointerCapture(e.pointerId);}catch(_){}}
+function swStart(e,el){if(e.target&&e.target.closest&&e.target.closest('button,a')){_swEl=null;return;}_swEl=el;_swX=e.clientX;_swY=e.clientY;_swBase=el.classList.contains('open')?-120:0;_swDx=_swBase;_swDir=null;el.style.transition='none';try{el.setPointerCapture(e.pointerId);}catch(_){}}
 function swMove(e,el){if(_swEl!==el)return;const dx=e.clientX-_swX,dy=e.clientY-_swY;if(_swDir===null){if(Math.abs(dx)<4&&Math.abs(dy)<4)return;_swDir=Math.abs(dx)>Math.abs(dy)?'h':'v';if(_swDir==='v'){el.style.transition='transform .2s';el.style.transform='translateX('+_swBase+'px)';_swEl=null;return;}}
   let nx=_swBase+dx;nx=Math.max(-130,Math.min(120,nx));_swDx=nx;el.style.transform='translateX('+nx+'px)';if(e.cancelable)e.preventDefault();}
 function swEnd(e,el,unitId){if(_swEl!==el)return;_swEl=null;el.style.transition='transform .2s';const dragged=Math.abs(_swDx-_swBase)>8;if(!dragged){const wasOpen=_swBase<0;el.style.transform='translateX(0)';el.classList.remove('open');if(!wasOpen)openUnit(unitId);return;}if(_swDx>=60){el.style.transform='translateX(0)';el.classList.remove('open');showUnitOnMap(unitId);return;}const openIt=_swDx<=-60;el.style.transform='translateX('+(openIt?-120:0)+'px)';el.classList.toggle('open',openIt);}
 function swCancel(el){el.style.transition='transform .2s';el.style.transform='translateX('+(el.classList.contains('open')?-120:0)+'px)';if(_swEl===el)_swEl=null;}
 function closeSwipe(btn){const w=btn.closest('.swipe-wrap');if(!w)return;const c=w.querySelector('.swipe-card');if(c){c.style.transition='transform .2s';c.style.transform='translateX(0)';c.classList.remove('open');}}
+function jbEnd(e,el,showId){if(_swEl!==el)return;_swEl=null;el.style.transition='transform .2s';const dragged=Math.abs(_swDx-_swBase)>8;if(!dragged){const wasOpen=_swBase<0;el.style.transform='translateX(0)';el.classList.remove('open');if(!wasOpen)openJob(showId);return;}if(_swDx<=-60){el.style.transform='translateX(-120px)';el.classList.add('open');return;}el.style.transform='translateX(0)';el.classList.remove('open');}
+function confirmDeleteJob(id){const s=showById(id);if(!s)return;const n=S.units.filter(u=>u.locationType==='show'&&u.locationId===id).length;if(n>0){toast(n+' unit'+(n>1?'s':'')+' still on this job — move them off first');return;}if(!confirm('Delete the job "'+s.name+'"? This cannot be undone.'))return;S.shows=S.shows.filter(x=>x.id!==id);if(S.currentShowId===id)S.currentShowId=(S.shows[0]&&S.shows[0].id)||null;save();render();toast('Job deleted');}
 /* ===== FILTERS ===== */
 function passFilter(u,f){if(f==='all')return true;if(f==='big')return u.klass==='big';if(f==='small')return u.klass!=='big';if(f==='down')return computeStatus(u).color==='red';if(f==='lowfuel'){const x=latestFuel(u);return x!=null&&x<20;}if(f==='service'){const s=serviceState(u).state;return s==='over'||s==='soon';}return true;}
 function filterBar(cur,fn){const F=[['all','All'],['big','Big iron'],['small','Small iron'],['down','Down'],['lowfuel','Low fuel'],['service','Service due']];
@@ -446,8 +448,8 @@ function renderJobsList(){
   const favs=getFavs();
   const list=S.shows.slice().sort((a,b)=>(favs.includes(b.id)?1:0)-(favs.includes(a.id)?1:0));
   const rows=list.map(s=>{const h=jobHealth(s);const d=dayOfShow(s);const fav=favs.includes(s.id);
-    return `<div class="card jobrow" onclick="openJob('${s.id}')"><div class="between"><div><div class="jt">${esc(s.name)}</div><div class="jsub">${esc(s.location||'')}${d?(' · Day '+d):''}</div></div><button class="favstar" style="color:${fav?'var(--accent)':'var(--ink2)'}" onclick="event.stopPropagation();toggleFav('${s.id}')">${fav?'★':'☆'}</button></div>
-      <div class="hbar"><span class="hchip">${h.units} units</span>${h.down?`<span class="hchip alarm"><span class="dot" style="background:var(--red)"></span>${h.down} down</span>`:''}${h.overdue?`<span class="hchip warnh">⏱ ${h.overdue} overdue</span>`:''}${!h.down&&!h.overdue&&h.units?`<span class="hchip" style="color:var(--green)"><span class="dot" style="background:var(--green)"></span>all good</span>`:''}<span class="hchip">${h.last?('active '+fmtAgo(h.last)):'no activity'}</span></div></div>`;}).join('');
+    return `<div class="swipe-wrap"><div class="swipe-actions"><button class="swipe-act del" onclick="event.stopPropagation();closeSwipe(this);confirmDeleteJob('${s.id}')">Delete</button></div><div class="card jobrow swipe-card" onpointerdown="swStart(event,this)" onpointermove="swMove(event,this)" onpointerup="jbEnd(event,this,'${s.id}')" onpointercancel="swCancel(this)"><div class="between"><div><div class="jt">${esc(s.name)}</div><div class="jsub">${esc(s.location||'')}${d?(' · Day '+d):''}</div></div><button class="favstar" style="color:${fav?'var(--accent)':'var(--ink2)'}" onclick="event.stopPropagation();toggleFav('${s.id}')">${fav?'★':'☆'}</button></div>
+      <div class="hbar"><span class="hchip">${h.units} units</span>${h.down?`<span class="hchip alarm"><span class="dot" style="background:var(--red)"></span>${h.down} down</span>`:''}${h.overdue?`<span class="hchip warnh">⏱ ${h.overdue} overdue</span>`:''}${!h.down&&!h.overdue&&h.units?`<span class="hchip" style="color:var(--green)"><span class="dot" style="background:var(--green)"></span>all good</span>`:''}<span class="hchip">${h.last?('active '+fmtAgo(h.last)):'no activity'}</span></div></div></div>`;}).join('');
   return `<div class="between"><h2 class="section" style="margin:0">Jobs</h2><button class="btn primary sm" onclick="editShow()">+ New</button></div>
     <p class="muted" style="margin:6px 0 14px;font-size:13px">Tap a job to see its fleet. Star a job to pin it to the top.</p>
     ${S.shows.length?rows:`<div class="empty"><div class="em">📋</div><p class="muted">No jobs yet. Create your first show.</p><button class="btn primary block" style="margin-top:12px" onclick="editShow()">+ Create a job</button></div>`}`;
@@ -661,7 +663,7 @@ function editUnit(id,prefillTag){const u=id?unitById(id):{};const isNew=!id;form
   const locOpts=[...S.shows.map(s=>`<option value="show:${s.id}" ${(currentShow()&&currentShow().id===s.id)?'selected':''}>${esc(s.name)}</option>`),...S.shops.map(s=>`<option value="shop:${s.id}">${esc(s.name)}</option>`)].join('');
   sheet(isNew?'Add asset':'Edit asset',`${isNew&&prefillTag?`<div class="banner">🆕 New asset <b>${esc(prefillTag)}</b> — fill in once; it's linked to this unit forever.</div>`:''}
     <label class="fld"><span class="lb">Type</span><div class="segwrap" id="t_seg"><button type="button" data-v="small" class="${(u.klass!=='big')?'on':''}" style="${u.klass!=='big'?'background:var(--accent);color:#fff':''}" onclick="tseg(this)">Small iron</button><button type="button" data-v="big" class="${u.klass==='big'?'on':''}" style="${u.klass==='big'?'background:var(--accent);color:#fff':''}" onclick="tseg(this)">Big iron</button></div></label>
-    <label class="fld"><span class="lb">Serial # <span class="muted" style="font-weight:400">— what you call it</span></span><input id="f_serial" value="${esc(u.serial||prefillTag||'')}" placeholder="e.g. 28B10199"/></label>
+    <label class="fld"><span class="lb">Serial #</span><input id="f_serial" value="${esc(u.serial||prefillTag||'')}" placeholder="e.g. 28B10199"/></label>
     <div class="grid2"><label class="fld"><span class="lb">Scan code (optional)</span><input id="f_tag" value="${esc(u.tagId||'')}" placeholder="QR/barcode, if any"/></label><label class="fld"><span class="lb">Weight (lb)</span><input id="f_weight" type="number" value="${esc(u.weightLbs||'')}"/></label></div>
     <div class="grid2"><label class="fld"><span class="lb">Make</span><input id="f_make" value="${esc(u.make||'')}" placeholder="Cat, Cummins"/></label><label class="fld"><span class="lb">Model</span><input id="f_model" value="${esc(u.model||'')}" placeholder="XQ125"/></label></div>
     <div class="grid2"><label class="fld"><span class="lb">Rating (kVA)</span><input id="f_kw" type="number" value="${esc(u.kw||'')}"/></label><label class="fld"><span class="lb">Breaker</span><input id="f_breaker" value="${esc(u.breakerSize||'')}" placeholder="400A"/></label></div>
