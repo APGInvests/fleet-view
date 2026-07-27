@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-27 sort-by-kva -->
+<!-- fleetview build 2026-07-27 sort-down-last -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -440,7 +440,7 @@ function confirmDeleteJob(id){const s=showById(id);if(!s)return;const n=S.units.
 function passFilter(u,f){if(f==='all')return true;if(f==='big')return u.klass==='big';if(f==='small')return u.klass!=='big';if(f==='down')return computeStatus(u).color==='red';if(f==='lowfuel'){const x=latestFuel(u);return x!=null&&x<20;}if(f==='service'){const s=serviceState(u).state;return s==='over'||s==='soon';}return true;}
 function filterBar(cur,fn){const F=[['all','All'],['big','Big iron'],['small','Small iron'],['down','Down'],['lowfuel','Low fuel'],['service','Service due']];
   return `<div class="filterbar">${F.map(([k,l])=>`<button class="fchip ${cur===k?'on':''} ${k==='down'?'down':''}" onclick="${fn}('${k}')">${l}</button>`).join('')}</div>`;}
-function byKva(a,b){const kv=v=>{if(v===null||v===undefined||v==='')return Infinity;const n=Number(v);return Number.isFinite(n)?n:Infinity;};const x=kv(a.kw),y=kv(b.kw);if(x!==y)return x-y;return String(a.serial||a.tagId||'').localeCompare(String(b.serial||b.tagId||''));}
+function byKva(a,b){const dn=u=>computeStatus(u).color==='red'?1:0;const da=dn(a),db=dn(b);if(da!==db)return da-db;const kv=v=>{if(v===null||v===undefined||v==='')return Infinity;const n=Number(v);return Number.isFinite(n)?n:Infinity;};const x=kv(a.kw),y=kv(b.kw);if(x!==y)return x-y;return String(a.serial||a.tagId||'').localeCompare(String(b.serial||b.tagId||''));}
 function sortUnits(list){return list.sort(byKva);}
 /* ===== JOBS ===== */
 function getFavs(){try{return JSON.parse(localStorage.getItem('fleetview_favs')||'[]');}catch(e){return [];}}
