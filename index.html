@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-27 job-swipe-delete -->
+<!-- fleetview build 2026-07-27 sort-by-kva -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -440,7 +440,8 @@ function confirmDeleteJob(id){const s=showById(id);if(!s)return;const n=S.units.
 function passFilter(u,f){if(f==='all')return true;if(f==='big')return u.klass==='big';if(f==='small')return u.klass!=='big';if(f==='down')return computeStatus(u).color==='red';if(f==='lowfuel'){const x=latestFuel(u);return x!=null&&x<20;}if(f==='service'){const s=serviceState(u).state;return s==='over'||s==='soon';}return true;}
 function filterBar(cur,fn){const F=[['all','All'],['big','Big iron'],['small','Small iron'],['down','Down'],['lowfuel','Low fuel'],['service','Service due']];
   return `<div class="filterbar">${F.map(([k,l])=>`<button class="fchip ${cur===k?'on':''} ${k==='down'?'down':''}" onclick="${fn}('${k}')">${l}</button>`).join('')}</div>`;}
-function sortUnits(list){const o={red:0,orange:1,yellow:2,blue:3,grey:4,green:5};return list.sort((a,b)=>o[computeStatus(a).color]-o[computeStatus(b).color]);}
+function byKva(a,b){const kv=v=>{if(v===null||v===undefined||v==='')return Infinity;const n=Number(v);return Number.isFinite(n)?n:Infinity;};const x=kv(a.kw),y=kv(b.kw);if(x!==y)return x-y;return String(a.serial||a.tagId||'').localeCompare(String(b.serial||b.tagId||''));}
+function sortUnits(list){return list.sort(byKva);}
 /* ===== JOBS ===== */
 function getFavs(){try{return JSON.parse(localStorage.getItem('fleetview_favs')||'[]');}catch(e){return [];}}
 function toggleFav(id){let f=getFavs();f=f.includes(id)?f.filter(x=>x!==id):f.concat([id]);try{localStorage.setItem('fleetview_favs',JSON.stringify(f));}catch(e){}render();}
@@ -477,7 +478,7 @@ function setFleetFilter(f){fleetFilter=f;render();}
 function whereIs(u){if(u.locationType==='transit')return 'En route → '+locName('show',u.inTransitToShowId);return locName(u.locationType,u.locationId);}
 function renderFleet(){let list=S.units.slice();
   if(fleetSearch){const q=fleetSearch.toLowerCase();list=list.filter(u=>[u.tagId,u.serial,u.make,u.model].some(x=>String(x||'').toLowerCase().includes(q)));}
-  list=list.filter(u=>passFilter(u,fleetFilter)).sort((a,b)=>String(a.tagId||a.serial).localeCompare(String(b.tagId||b.serial)));
+  list=list.filter(u=>passFilter(u,fleetFilter)).sort(byKva);
   const rows=list.map(u=>{const cs=computeStatus(u);return `<div class="card" style="padding:12px 14px;margin-bottom:9px;cursor:pointer;border-left:5px solid ${SC[cs.color]}" onclick="openUnit('${u.id}')">
     <div class="between"><div style="min-width:0"><div style="font-family:var(--serif);font-size:18px;font-weight:700">${esc((u.model||u.make||'GEN')+' · #'+(u.serial||u.tagId||'—'))}</div>
     <div class="uloc" style="margin-top:3px">${IC.pin}<span>${esc(whereIs(u))}</span></div></div>${statusPill(cs)}</div></div>`;}).join('');
