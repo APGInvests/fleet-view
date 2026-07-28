@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-27 serial-field-keys -->
+<!-- fleetview build 2026-07-28 fleet-delete+back-to-fleet -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -337,7 +337,7 @@ function fmtAgo(ts){if(!ts)return 'never';const s=(now()-ts)/1000;if(s<60)return
 function fmtDate(ts){if(!ts)return '';return new Date(ts).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});}
 function currentShow(){return S.shows.find(x=>x.id===S.currentShowId)||null;}
 function showById(id){return S.shows.find(x=>x.id===id)||null;}
-function locName(type,id){if(type==='show'){const s=showById(id);return s?s.name:'Show';}if(type==='shop'){const s=S.shops.find(x=>x.id===id);return s?s.name:'Shop';}return '—';}
+function locName(type,id){if(type==='show'){const s=showById(id);return s?s.name:'Show';}if(type==='shop'){const s=S.shops.find(x=>x.id===id);return s?s.name:'Shop';}if(type==='fleet')return 'Unassigned';return '—';}
 function unitByTag(tag){const t=String(tag).trim().toLowerCase();return S.units.find(u=>String(u.tagId).trim().toLowerCase()===t);}
 function unitByCode(c){c=String(c||'').trim().toLowerCase();if(!c)return null;return S.units.find(u=>String(u.serial||'').trim().toLowerCase()===c||String(u.tagId||'').trim().toLowerCase()===c)||null;}
 function unitById(id){return S.units.find(u=>u.id===id);}
@@ -479,9 +479,9 @@ function whereIs(u){if(u.locationType==='transit')return 'En route → '+locName
 function renderFleet(){let list=S.units.slice();
   if(fleetSearch){const q=fleetSearch.toLowerCase();list=list.filter(u=>[u.tagId,u.serial,u.make,u.model].some(x=>String(x||'').toLowerCase().includes(q)));}
   list=list.filter(u=>passFilter(u,fleetFilter)).sort(byKva);
-  const rows=list.map(u=>{const cs=computeStatus(u);return `<div class="card" style="padding:12px 14px;margin-bottom:9px;cursor:pointer;border-left:5px solid ${SC[cs.color]}" onclick="openUnit('${u.id}')">
+  const rows=list.map(u=>{const cs=computeStatus(u);return `<div class="swipe-wrap"><div class="swipe-maphint">🗺 Map</div><div class="swipe-actions"><button class="swipe-act del" onclick="event.stopPropagation();closeSwipe(this);confirmDeleteUnit('${u.id}')">Delete</button></div><div class="card swipe-card" style="padding:12px 14px;margin-bottom:0;cursor:pointer;border-left:5px solid ${SC[cs.color]}" onpointerdown="swStart(event,this)" onpointermove="swMove(event,this)" onpointerup="swEnd(event,this,'${u.id}')" onpointercancel="swCancel(this)">
     <div class="between"><div style="min-width:0"><div style="font-family:var(--serif);font-size:18px;font-weight:700">${esc((u.model||u.make||'GEN')+' · #'+(u.serial||u.tagId||'—'))}</div>
-    <div class="uloc" style="margin-top:3px">${IC.pin}<span>${esc(whereIs(u))}</span></div></div>${statusPill(cs)}</div></div>`;}).join('');
+    <div class="uloc" style="margin-top:3px">${IC.pin}<span>${esc(whereIs(u))}</span></div></div>${statusPill(cs)}</div></div></div>`;}).join('');
   return `<div class="between"><h2 class="section" style="margin:0">Fleet</h2><span class="muted" style="font-family:var(--mono);font-size:12px">${S.units.length} assets</span></div>
     <p class="muted" style="margin:6px 0 12px;font-size:13px">Every asset the company owns, wherever it is.</p>
     <div class="searchbar">${IC.search}<input placeholder="Search all assets…" value="${esc(fleetSearch)}" oninput="fleetSearch=this.value;rerenderFleet()"/></div>
@@ -631,7 +631,7 @@ function quickAddJob(unitId){sheet('New job',`<label class="fld"><span class="lb
 function doQuickAddJob(unitId){const nm=($('#qj_name').value||'').trim();if(!nm){toast('Enter a job name');return;}const id=uid('show');S.shows.push({id,createdAt:now(),name:nm,location:($('#qj_loc').value||'').trim(),startDate:null,site:null});S.currentShowId=id;save();if(unitId)pickDest(unitId,'show',id);else{closeSheet();openJob(id);}}
 function quickAddShop(unitId){sheet('New shop',`<label class="fld"><span class="lb">Shop name</span><input id="qs_name" placeholder="e.g. Dallas Yard"/></label><button class="btn primary block" onclick="doQuickAddShop('${unitId||''}')">Create &amp; move here</button>`);setTimeout(()=>{const el=$('#qs_name');if(el)el.focus();},120);}
 function doQuickAddShop(unitId){const nm=($('#qs_name').value||'').trim();if(!nm){toast('Enter a shop name');return;}const id=uid('shop');S.shops.push({id,name:nm});save();if(unitId)pickDest(unitId,'shop',id);else{closeSheet();render();}}
-function moveMenu(unitId,fromScan){moveFromScan=!!fromScan;const rec=recentDests();const recBtns=rec.length?('<div class="lb" style="margin-bottom:6px">RECENT</div>'+rec.map(d=>`<button class="btn primary block" style="margin-bottom:8px" onclick="pickDest('${unitId}','${d.type}','${d.id}')">${esc(d.name)}${d.type==='shop'?' · shop':''}</button>`).join('')+'<hr class="sep"/>'):'';const shows=S.shows.map(s=>`<button class="btn ghost block" style="margin-bottom:8px" onclick="pickDest('${unitId}','show','${s.id}')">${esc(s.name)}</button>`).join('');const shops=S.shops.map(s=>`<button class="btn ghost block" style="margin-bottom:8px" onclick="pickDest('${unitId}','shop','${s.id}')">${esc(s.name)}</button>`).join('');const openBtn=fromScan?`<hr class="sep"/><button class="btn ghost block" onclick="closeSheet();openUnit('${unitId}')">Just open it (don't move)</button>`:'';sheet(fromScan?"Where's it going?":'Move / scan into…',`${recBtns}<div class="lb" style="margin-bottom:6px">JOBS</div>${shows}<button class="btn dark block" style="margin-bottom:8px" onclick="quickAddJob('${unitId}')">+ New job</button><hr class="sep"/><div class="lb" style="margin-bottom:6px">SHOPS</div>${shops}<button class="btn dark block" style="margin-top:2px" onclick="quickAddShop('${unitId}')">+ New shop</button>${openBtn}`);}
+function moveMenu(unitId,fromScan){moveFromScan=!!fromScan;const rec=recentDests();const recBtns=rec.length?('<div class="lb" style="margin-bottom:6px">RECENT</div>'+rec.map(d=>`<button class="btn primary block" style="margin-bottom:8px" onclick="pickDest('${unitId}','${d.type}','${d.id}')">${esc(d.name)}${d.type==='shop'?' · shop':''}</button>`).join('')+'<hr class="sep"/>'):'';const shows=S.shows.map(s=>`<button class="btn ghost block" style="margin-bottom:8px" onclick="pickDest('${unitId}','show','${s.id}')">${esc(s.name)}</button>`).join('');const shops=S.shops.map(s=>`<button class="btn ghost block" style="margin-bottom:8px" onclick="pickDest('${unitId}','shop','${s.id}')">${esc(s.name)}</button>`).join('');const openBtn=fromScan?`<hr class="sep"/><button class="btn ghost block" onclick="closeSheet();openUnit('${unitId}')">Just open it (don't move)</button>`:'';sheet(fromScan?"Where's it going?":'Move / scan into…',`${recBtns}<div class="lb" style="margin-bottom:6px">JOBS</div>${shows}<button class="btn dark block" style="margin-bottom:8px" onclick="quickAddJob('${unitId}')">+ New job</button><hr class="sep"/><div class="lb" style="margin-bottom:6px">SHOPS</div>${shops}<button class="btn dark block" style="margin-top:2px" onclick="quickAddShop('${unitId}')">+ New shop</button><hr class="sep"/><button class="btn ghost block" onclick="pickDest('${unitId}','fleet','')">↩ Back to fleet (unassign)</button>${openBtn}`);}
 /* ===== UNIT DETAIL ===== */
 let detailTab='vitals';
 function openUnit(id){detailTab='vitals';renderUnit(id);}
