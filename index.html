@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-28 fleet-delete+back-to-fleet -->
+<!-- fleetview build 2026-07-28 jobs-search+jobmap -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -434,7 +434,7 @@ function swMove(e,el){if(_swEl!==el)return;const dx=e.clientX-_swX,dy=e.clientY-
 function swEnd(e,el,unitId){if(_swEl!==el)return;_swEl=null;el.style.transition='transform .2s';const dragged=Math.abs(_swDx-_swBase)>8;if(!dragged){const wasOpen=_swBase<0;el.style.transform='translateX(0)';el.classList.remove('open');if(!wasOpen)openUnit(unitId);return;}if(_swDx>=60){el.style.transform='translateX(0)';el.classList.remove('open');showUnitOnMap(unitId);return;}const openIt=_swDx<=-60;el.style.transform='translateX('+(openIt?-120:0)+'px)';el.classList.toggle('open',openIt);}
 function swCancel(el){el.style.transition='transform .2s';el.style.transform='translateX('+(el.classList.contains('open')?-120:0)+'px)';if(_swEl===el)_swEl=null;}
 function closeSwipe(btn){const w=btn.closest('.swipe-wrap');if(!w)return;const c=w.querySelector('.swipe-card');if(c){c.style.transition='transform .2s';c.style.transform='translateX(0)';c.classList.remove('open');}}
-function jbEnd(e,el,showId){if(_swEl!==el)return;_swEl=null;el.style.transition='transform .2s';const dragged=Math.abs(_swDx-_swBase)>8;if(!dragged){const wasOpen=_swBase<0;el.style.transform='translateX(0)';el.classList.remove('open');if(!wasOpen)openJob(showId);return;}if(_swDx<=-60){el.style.transform='translateX(-120px)';el.classList.add('open');return;}el.style.transform='translateX(0)';el.classList.remove('open');}
+function jbEnd(e,el,showId){if(_swEl!==el)return;_swEl=null;el.style.transition='transform .2s';const dragged=Math.abs(_swDx-_swBase)>8;if(!dragged){const wasOpen=_swBase<0;el.style.transform='translateX(0)';el.classList.remove('open');if(!wasOpen)openJob(showId);return;}if(_swDx>=60){el.style.transform='translateX(0)';el.classList.remove('open');showJobOnMap(showId);return;}if(_swDx<=-60){el.style.transform='translateX(-120px)';el.classList.add('open');return;}el.style.transform='translateX(0)';el.classList.remove('open');}
 function confirmDeleteJob(id){const s=showById(id);if(!s)return;const n=S.units.filter(u=>u.locationType==='show'&&u.locationId===id).length;if(n>0){toast(n+' unit'+(n>1?'s':'')+' still on this job — move them off first');return;}if(!confirm('Delete the job "'+s.name+'"? This cannot be undone.'))return;S.shows=S.shows.filter(x=>x.id!==id);if(S.currentShowId===id)S.currentShowId=(S.shows[0]&&S.shows[0].id)||null;save();render();toast('Job deleted');}
 /* ===== FILTERS ===== */
 function passFilter(u,f){if(f==='all')return true;if(f==='big')return u.klass==='big';if(f==='small')return u.klass!=='big';if(f==='down')return computeStatus(u).color==='red';if(f==='lowfuel'){const x=latestFuel(u);return x!=null&&x<20;}if(f==='service'){const s=serviceState(u).state;return s==='over'||s==='soon';}return true;}
@@ -445,15 +445,20 @@ function sortUnits(list){return list.sort(byKva);}
 /* ===== JOBS ===== */
 function getFavs(){try{return JSON.parse(localStorage.getItem('fleetview_favs')||'[]');}catch(e){return [];}}
 function toggleFav(id){let f=getFavs();f=f.includes(id)?f.filter(x=>x!==id):f.concat([id]);try{localStorage.setItem('fleetview_favs',JSON.stringify(f));}catch(e){}render();}
+let jobsSearch='';
+function rerenderJobs(){const v=$('#view');const sc=v.querySelector('.searchbar input');const pos=sc?sc.selectionStart:null;v.innerHTML=renderJobsList();const ni=v.querySelector('.searchbar input');if(ni){ni.focus();if(pos!=null)try{ni.setSelectionRange(pos,pos);}catch(e){}}}
+function showJobOnMap(showId){const s=showById(showId);if(!s)return;S.currentShowId=showId;mapScope='job';mapFocusUnit=null;const ov=$('#overlay');if(ov)ov.classList.remove('on');go('map');}
 function renderJobsList(){
   const favs=getFavs();
-  const list=S.shows.slice().sort((a,b)=>(favs.includes(b.id)?1:0)-(favs.includes(a.id)?1:0));
+  let list=S.shows.slice().sort((a,b)=>(favs.includes(b.id)?1:0)-(favs.includes(a.id)?1:0));
+  if(jobsSearch){const q=jobsSearch.toLowerCase();list=list.filter(s=>[s.name,s.location].some(x=>String(x||'').toLowerCase().includes(q)));}
   const rows=list.map(s=>{const h=jobHealth(s);const d=dayOfShow(s);const fav=favs.includes(s.id);
-    return `<div class="swipe-wrap"><div class="swipe-actions"><button class="swipe-act del" onclick="event.stopPropagation();closeSwipe(this);confirmDeleteJob('${s.id}')">Delete</button></div><div class="card jobrow swipe-card" onpointerdown="swStart(event,this)" onpointermove="swMove(event,this)" onpointerup="jbEnd(event,this,'${s.id}')" onpointercancel="swCancel(this)"><div class="between"><div><div class="jt">${esc(s.name)}</div><div class="jsub">${esc(s.location||'')}${d?(' · Day '+d):''}</div></div><button class="favstar" style="color:${fav?'var(--accent)':'var(--ink2)'}" onclick="event.stopPropagation();toggleFav('${s.id}')">${fav?'★':'☆'}</button></div>
+    return `<div class="swipe-wrap"><div class="swipe-maphint">🗺 Map</div><div class="swipe-actions"><button class="swipe-act del" onclick="event.stopPropagation();closeSwipe(this);confirmDeleteJob('${s.id}')">Delete</button></div><div class="card jobrow swipe-card" onpointerdown="swStart(event,this)" onpointermove="swMove(event,this)" onpointerup="jbEnd(event,this,'${s.id}')" onpointercancel="swCancel(this)"><div class="between"><div><div class="jt">${esc(s.name)}</div><div class="jsub">${esc(s.location||'')}${d?(' · Day '+d):''}</div></div><button class="favstar" style="color:${fav?'var(--accent)':'var(--ink2)'}" onclick="event.stopPropagation();toggleFav('${s.id}')">${fav?'★':'☆'}</button></div>
       <div class="hbar"><span class="hchip">${h.units} units</span>${h.down?`<span class="hchip alarm"><span class="dot" style="background:var(--red)"></span>${h.down} down</span>`:''}${h.overdue?`<span class="hchip warnh">⏱ ${h.overdue} overdue</span>`:''}${!h.down&&!h.overdue&&h.units?`<span class="hchip" style="color:var(--green)"><span class="dot" style="background:var(--green)"></span>all good</span>`:''}<span class="hchip">${h.last?('active '+fmtAgo(h.last)):'no activity'}</span></div></div></div>`;}).join('');
   return `<div class="between"><h2 class="section" style="margin:0">Jobs</h2><button class="btn primary sm" onclick="editShow()">+ New</button></div>
-    <p class="muted" style="margin:6px 0 14px;font-size:13px">Tap a job to see its fleet. Star a job to pin it to the top.</p>
-    ${S.shows.length?rows:`<div class="empty"><div class="em">📋</div><p class="muted">No jobs yet. Create your first show.</p><button class="btn primary block" style="margin-top:12px" onclick="editShow()">+ Create a job</button></div>`}`;
+    <p class="muted" style="margin:6px 0 12px;font-size:13px">Tap a job to see its fleet. Star a job to pin it to the top.</p>
+    ${S.shows.length?`<div class="searchbar">${IC.search}<input placeholder="Search jobs…" value="${esc(jobsSearch)}" autocapitalize="off" autocorrect="off" oninput="jobsSearch=this.value;rerenderJobs()"/></div>`:''}
+    ${S.shows.length?(list.length?rows:`<div class="empty" style="padding:26px"><p class="muted">No jobs match “${esc(jobsSearch)}”.</p></div>`):`<div class="empty"><div class="em">📋</div><p class="muted">No jobs yet. Create your first show.</p><button class="btn primary block" style="margin-top:12px" onclick="editShow()">+ Create a job</button></div>`}`;
 }
 let jobFilter='all',jobSearch='';
 function setJobFilter(f){jobFilter=f;render();}
