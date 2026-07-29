@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-28 gps-placement-only -->
+<!-- fleetview build 2026-07-28 gps-placement-only-2 -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -592,7 +592,7 @@ function openScan(mode){addMode=(mode==='fleet'||(!mode&&TAB==='fleet'))?'fleet'
   const title=fleet?'Add asset to fleet':('Add to '+currentShow().name);
   const intro=fleet?`Scan the sticker or search by serial. If it's already in the fleet, you'll just open it — no duplicates.`:`Scan the sticker, or search your fleet by serial. If it's already in the fleet you'll move it onto <b>${esc(currentShow().name)}</b> — no duplicates.`;
   sheet(title,`<p class="muted" style="margin-top:0">${intro}</p><div id="reader" style="min-height:200px;border-radius:14px;overflow:hidden;background:rgba(128,128,128,.12)"></div><div id="scanMsg" class="muted" style="text-align:center;margin:9px 0;font-size:13px">Starting camera…</div><button id="torchBtn" class="btn ghost block" style="display:none;margin-bottom:4px" onclick="toggleTorch()">🔦 Light</button><hr class="sep"/><label class="fld"><span class="lb">Search the fleet by serial</span><input id="assetSearch" placeholder="Type a serial…" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" oninput="searchFleet(this.value)"/></label><div id="searchResults"></div><button class="btn primary block" style="margin-top:6px" onclick="addNewFromSearch()">+ Add new asset</button>`,stopScanner);
-  startScanner();captureGPS();}
+  startScanner();}
 function startScanner(){const msg=$('#scanMsg');if(!msg)return;if(typeof Html5Qrcode==='undefined'){msg.innerHTML='Scanner didn\'t load — type the code below, or “Add manually”.';return;}
   const onOk=d=>{try{if(scanner)scanner.pause(true);}catch(e){}if(navigator.vibrate)navigator.vibrate(30);handleCode(d);};
   const fail=err=>{msg.innerHTML='Camera unavailable ('+esc((err&&err.name)||'blocked')+'). Type the code below, or “Add manually”.';};
