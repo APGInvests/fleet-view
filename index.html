@@ -310,7 +310,7 @@ let SNAP={};
 function snapshot(){SNAP={};TABLES.forEach(t=>{SNAP[t]={};S[t].forEach(o=>{SNAP[t][o.id]=JSON.stringify(toRow(t,o));});});}
 let flushTimer=null,flushing=false;
 function scheduleFlush(){if(!SYNC_READY)return;clearTimeout(flushTimer);flushTimer=setTimeout(flush,450);}
-async function flush(){if(!SYNC_READY||flushing)return;flushing=true;try{for(const t of TABLES){const cur={};S[t].forEach(o=>{cur[o.id]=o;});const ups=[];for(const id in cur){const rs=JSON.stringify(toRow(t,cur[id]));if(!SNAP[t]||SNAP[t][id]!==rs)ups.push(toRow(t,cur[id]));}if(ups.length){const {error}=await sb.from(t).upsert(ups);if(error)console.warn('upsert',t,error.message);}const dels=[];if(SNAP[t])for(const id in SNAP[t]){if(!(id in cur))dels.push(id);}if(dels.length){const {error}=await sb.from(t).delete().in('id',dels);if(error)console.warn('del',t,error.message);}}snapshot();}catch(e){console.warn('flush',e);}flushing=false;}
+async function flush(){if(!SYNC_READY||flushing)return;flushing=true;try{await syncPendingPhotos();for(const t of TABLES){const cur={};S[t].forEach(o=>{cur[o.id]=o;});const ups=[];for(const id in cur){const rs=JSON.stringify(toRow(t,cur[id]));if(!SNAP[t]||SNAP[t][id]!==rs)ups.push(toRow(t,cur[id]));}if(ups.length){const {error}=await sb.from(t).upsert(ups);if(error)console.warn('upsert',t,error.message);}const dels=[];if(SNAP[t])for(const id in SNAP[t]){if(!(id in cur))dels.push(id);}if(dels.length){const {error}=await sb.from(t).delete().in('id',dels);if(error)console.warn('del',t,error.message);}}snapshot();}catch(e){console.warn('flush',e);}flushing=false;}
 function subscribeRealtime(){try{realtimeCh=sb.channel('fleet_all');TABLES.forEach(t=>realtimeCh.on('postgres_changes',{event:'*',schema:'public',table:t},scheduleReload));realtimeCh.subscribe();}catch(e){console.warn('rt',e);}}
 let reloadTimer=null;
 function scheduleReload(){clearTimeout(reloadTimer);reloadTimer=setTimeout(async()=>{if(flushing){scheduleReload();return;}await loadAll();render();},800);}
@@ -613,6 +613,15 @@ function gpsLink(g){if(!g)return '';return `<a href="https://www.google.com/maps
 let draftPhotos=[];
 function compressImage(file,cb){const rd=new FileReader();rd.onload=()=>{const img=new Image();img.onload=()=>{let w=img.width,h=img.height;const max=1024;if(w>h&&w>max){h=Math.round(h*max/w);w=max;}else if(h>=w&&h>max){w=Math.round(w*max/h);h=max;}const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);try{cb(c.toDataURL('image/jpeg',0.55));}catch(e){toast('Could not process image');}};img.onerror=()=>toast('Bad image');img.src=rd.result;};rd.readAsDataURL(file);}
 function persistOrWarn(undo){save();return true;}
+/* Photos: capture stores data URIs (works offline); flush() swaps them for Storage
+   URLs before rows serialize. Bounded — runs inside flush() with flushing=true, so a
+   stalled upload must not hold the lock open (cap per flush + timeout per upload). */
+function isDataURI(p){return typeof p==='string'&&p.slice(0,5)==='data:';}
+function dataURItoBlob(d){const i=d.indexOf(',');const mime=(d.slice(0,i).match(/data:(.*?)(;|$)/)||[])[1]||'image/jpeg';const bin=atob(d.slice(i+1));const arr=new Uint8Array(bin.length);for(let k=0;k<bin.length;k++)arr[k]=bin.charCodeAt(k);return new Blob([arr],{type:mime});}
+const PHOTO_FLUSH_CAP=6,PHOTO_UPLOAD_MS=8000;
+const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),ms))]);
+async function syncPendingPhotos(){const jobs=[];S.units.forEach(o=>{(o.photos||[]).forEach((p,i)=>{if(isDataURI(p))jobs.push({o,i,path:'units/'+o.id+'/'+uid()+'.jpg'});});});S.issues.forEach(o=>{(o.photos||[]).forEach((p,i)=>{if(isDataURI(p))jobs.push({o,i,path:'issues/'+o.id+'/'+uid()+'.jpg'});});});
+  for(const j of jobs.slice(0,PHOTO_FLUSH_CAP)){try{const {error}=await withTimeout(sb.storage.from('unit-photos').upload(j.path,dataURItoBlob(j.o.photos[j.i]),{contentType:'image/jpeg'}),PHOTO_UPLOAD_MS);if(error)continue;const {data}=sb.storage.from('unit-photos').getPublicUrl(j.path);if(data&&data.publicUrl)j.o.photos[j.i]=data.publicUrl;}catch(e){}}}
 function bigPhoto(src){$('#photoBig').src=src;$('#photoOverlay').classList.add('on');}
 function photoStrip(items,vp,rp){return `<div class="photostrip">${items.map((p,i)=>`<div class="ph"><img src="${p}" onclick="${vp}${i})"/>${rp?`<button class="rm" onclick="${rp}${i})">✕</button>`:''}</div>`).join('')}</div>`;}
 function renderDraftStrip(){return draftPhotos.length?photoStrip(draftPhotos,'bigDraftPhoto(','rmDraftPhoto('):'<p class="muted" style="font-size:12px;margin:2px 0 8px">No photos added.</p>';}
