@@ -42,6 +42,16 @@ The suite encodes the product contracts, not just syntax:
 - **Every field optional** — a routine check with no vitals and no photo is valid.
 - **People, not emails** — logs stamp "Mike R.", never a raw email.
 
+## Standing invariants vs one-off extras
+
+Files named `tools/fv_inv_*.js` are **standing invariants**: preflight auto-loads
+every one of them on every run, no opt-in. Use them for contracts that must hold
+forever (the offline write path lives in `fv_inv_offline.js`, the service worker
+in `fv_inv_sw.js`, photo storage in `fv_inv_photos.js`). They use the same
+`(app, t) => {...}` export shape as extras, and may be `async`.
+
+`--extras` remains for one-off, per-deploy assertion files.
+
 ## Adding tests for a new feature
 
 Don't edit `fv_smoke.js`. Write a small file exporting `(app, t) => {...}`:

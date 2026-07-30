@@ -35,6 +35,7 @@ now fetch what we intended.
 
 import argparse
 import base64
+import glob
 import hashlib
 import json
 import os
@@ -54,7 +55,9 @@ TREE_API = f"https://api.github.com/repos/{OWNER}/{REPO}/git/trees/{BRANCH}"
 RAW_BASE = f"https://raw.githubusercontent.com/{OWNER}/{REPO}/{BRANCH}"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LOCAL = os.path.join(HERE, APP_PATH)
+# The app lives at the repo root (local git clone workflow). LOCAL used to be
+# tools/index.html back when `pull` curled the live file down for API pushes.
+LOCAL = os.path.join(os.path.dirname(HERE), APP_PATH)
 STATE = os.path.join(HERE, ".fv_state.json")
 PARAMS = "/tmp/fv_params.json"
 
@@ -204,7 +207,10 @@ def cmd_preflight(args):
         bad("fv_smoke.js missing — the standing invariant suite must be present")
         return 1
 
-    cmd = ["node", smoke, LOCAL] + (args.extras or [])
+    # Standing invariants: every tools/fv_inv_*.js file always runs, no opt-in.
+    # --extras remains for one-off per-deploy assertion files.
+    standing = sorted(glob.glob(os.path.join(HERE, "fv_inv_*.js")))
+    cmd = ["node", smoke, LOCAL] + standing + (args.extras or [])
     print(f"       running: {' '.join(os.path.basename(c) for c in cmd)}")
     res = subprocess.run(cmd, capture_output=True, text=True)
     sys.stdout.write(res.stdout)

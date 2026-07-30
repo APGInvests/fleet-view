@@ -34,7 +34,7 @@
 ## Standing constraints for every task
 
 - One logical change per commit. Read the real current code before editing — line numbers below were true on 2026-07-29 and will drift.
-- The gate for every task is the invariant suite: `node tools/fv_smoke.js index.html tools/fv_inv_*.js` → `RESULT: PASS`. All 96 existing assertions must stay green; the new files below add to them.
+- The gate for every task is the invariant suite: `node tools/fv_smoke.js index.html tools/fv_inv_*.js` → `RESULT: PASS`. All 96 existing assertions must stay green; the new files below add to them. (Where a phase-end step says `fv_deploy.py preflight`, "PASS" means the suite verdict — preflight's trailing blob-sha staging step is legacy API-workflow machinery and may complain; it is slated for the deferred §9/tooling rework.)
 - Deploy = `git add` + `git commit` + `git push` to `main` (local clone; **not** the old GitHub-API paramsFile flow), after bumping the build marker at `index.html:13`. Verify live:
   ```bash
   curl -s -L "https://apginvests.github.io/fleet-view/?v=$(date +%s)" | grep -o "fleetview build [0-9-]* [a-z+-]*"
