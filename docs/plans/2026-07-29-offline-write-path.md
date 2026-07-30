@@ -34,6 +34,7 @@
 ## Standing constraints for every task
 
 - One logical change per commit. Read the real current code before editing — line numbers below were true on 2026-07-29 and will drift.
+- **Deploy = push commits, so phase isolation is a branch concern, not a file concern.** Pushing `main` ships *everything* on it — there is no per-file deploy anymore. Work for a phase that is not yet cleared for production (pending a migration, a device drill, an approval) must live on a branch; `main` only ever holds phases that may ship together. *Current instance (decided 2026-07-29): Phase 1 and Phase 2 commits are already interleaved on local `main` — they deploy together in one push after the Task 2.4 sandbox drill passes; nothing pushes before that.*
 - The gate for every task is the invariant suite: `node tools/fv_smoke.js index.html tools/fv_inv_*.js` → `RESULT: PASS`. All 96 existing assertions must stay green; the new files below add to them. (Where a phase-end step says `fv_deploy.py preflight`, "PASS" means the suite verdict — preflight's trailing blob-sha staging step is legacy API-workflow machinery and may complain; it is slated for the deferred §9/tooling rework.)
 - Deploy = `git add` + `git commit` + `git push` to `main` (local clone; **not** the old GitHub-API paramsFile flow), after bumping the build marker at `index.html:13`. Verify live:
   ```bash
