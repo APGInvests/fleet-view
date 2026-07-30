@@ -228,13 +228,13 @@ The owner repeatedly declined features to keep the app usable. Every item below 
 
 **Chart.js is loaded but unused.** The vitals view originally used stacked multi-axis charts; they were unreadable (metrics with wildly different ranges cannot share a chart honestly) and were replaced by the Recent-checks table. `drawTrend()` still exists but is never called. Safe to delete along with the CDN tag.
 
-**Photos are base64 inside table rows.** `loadAll()` does `select('*')`, so every full read — *including every realtime-triggered reload* — pulls all photo bytes. At ~50 units × 3 photos this is multi-megabyte and reads to users as "the app is broken" on festival LTE. A `unit-photos` storage bucket already exists in Supabase but is unused. **Highest-value technical fix on this list:** move photos to storage and keep URLs in rows, or at minimum exclude photos from the list-view read path.
+**Photos — resolved 2026-07-30 (build `photos-sw`).** Capture still stores data URIs (works offline); `flush()` uploads them to the `unit-photos` Storage bucket and swaps in public URLs before rows serialize — bounded (6/flush, 8s abort via AbortController) so a stalled LTE upload can't hold the flush lock. Storage outage: URI stays, save proceeds, retried next flush. Accepted debt: removed photos orphan their Storage objects, and a timed-out-but-landed upload orphans + duplicates on retry. **One-time migration of legacy base64 rows (~8 units): `tools/fv_migrate_photos.js` — pending owner run** (`--dry-run` first; ordering matters: only run *after* the `photos-sw` build is live, since the old app could re-flush base64 over migrated rows).
 
 **`closeSheet()` unconditionally calls `render()`.** Closing even a read-only sheet rebuilds the whole view and re-initialises Leaflet on the map tab. Will flash/scroll-jump as data grows. Fix: a `dirty` flag on `sheet()`.
 
-**No service worker.** An installed home-screen app can serve a stale document indefinitely. Expect "I deployed it but I don't see the change" — hand out a `?v=…` cache-busted link. Adding a service worker fixes updates but trades instant updates for a tap-to-update model that must be explained to the crew.
+**Service worker — shipped 2026-07-30 (`sw.js`, `fv-sw-1`).** Navigations are network-first (3.5s timeout, cache fallback) so online users still get fresh HTML instantly; five CDN hosts are cache-first; backend traffic is never intercepted. SW updates are tap-to-update (`SKIP_WAITING` prompt bar). **Kill switch:** deploy `sw.js` with `KILL = true` — it unregisters and clears `fv-sw-*` caches fleet-wide within one update-check cycle (~10 min). Cache deletion is prefix-scoped because Cache Storage is origin-scoped and every Pages project site shares `apginvests.github.io`; any sandbox copy must rewrite the prefix (see `docs/plans/2026-07-29-offline-write-path.md`, Task 2.4).
 
-**"Reset ALL data" is under-protected.** It sits inline in Settings just after Save, guarded only by a native `confirm()`. It wipes every job, asset, check and issue **for the whole team**. Should be behind a separate danger-zone sheet with a typed confirmation and a count of what will be destroyed.
+**"Reset ALL data" — resolved 2026-07-30 (build `delete-gate`).** Removed entirely, along with the sample-data loader; unit deletion now requires typing DELETE and shows the history count it will destroy.
 
 **Tap targets below guideline.** `.closex` is 34 px; `.backbtn` has `padding:0` around a 16 px SVG (~20 px effective). Should be ≥44 px — users wear gloves.
 
@@ -311,7 +311,9 @@ The database holds real crew records. To click through the live app safely, buil
 Ordered roughly by value. All are unbuilt and all were deliberately deferred — the owner froze scope to drive crew adoption first.
 
 **Tail of phase 1**
-1. **Offline-tolerant field mode.** Show sites have dead zones, which is exactly when the app matters. Sequence: (a) service worker caching the app shell so it *opens* offline, (b) cache last-loaded data so it has something to *show*, (c) outbox queue for writes, replayed on reconnect. Conflict rule: append-only records keep both and order by timestamp; only editable spec fields need last-write-wins. All client-side — no backend change. **Greenlight before the next show with known bad signal.**
+1. **Offline-tolerant field mode.** Show sites have dead zones, which is exactly when the app matters. Step (a) — the service worker app shell — **shipped 2026-07-30**. Remaining: (b) cache last-loaded data, (c) durable write queue replayed on reconnect. Full design, invariants, and sequencing live in `docs/plans/2026-07-29-offline-write-path.md` (durable-diff architecture — the S-vs-SNAP diff *is* the queue; no separate outbox). Parked until a show with known bad signal forces it.
+
+1b. **Big iron / TwinPak model** — in flight via the Hyperagent build spec at `docs/big-iron-hyperagent-spec.md` (one NES line item = one record; true TwinPak = one record, two engines, event-sourced hours, per-engine service targets). The spec is the authority; read it before touching big-iron code.
 2. **"What's on my show" report / manifest.** One tap on a job → shareable roster (serial, kVA, placement, status, hours, open issues) + totals, with copy/email/CSV. This is the owner's stated payoff: proof of what was sent to a show without driving around collecting serials. Doubles as the end-of-show punch list for the service department.
 3. **Job overview strip** — live tiles (on-site / running / down / overdue / total kVA / avg load) + a needs-attention shortlist, for monitoring from an office.
 
@@ -319,7 +321,7 @@ Ordered roughly by value. All are unbuilt and all were deliberately deferred —
 4. **Sizing insight from load %** — flag units consistently under ~30% (oversized → downsize) or over ~85% (→ upsize/parallel). Uses data already captured.
 5. **Runtime per show** — hours-run delta from logged engine hours.
 6. **Fast-load actions** — optional "lock to this destination" for single-truck scanning, receive-a-truckload, multi-select move.
-7. **Photos → Supabase Storage** (see §7).
+7. ~~Photos → Supabase Storage~~ — **shipped 2026-07-30** (see §7).
 8. **CSV import/export** — bulk-load an existing fleet; export the manifest.
 
 **Phase 3**
