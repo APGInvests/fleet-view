@@ -149,6 +149,13 @@ function makeEl(tag = 'div', id = '') {
     setSelectionRange() {},
     setPointerCapture() {},
     releasePointerCapture() {},
+    // canvas surface — compressImage() draws and re-encodes photos
+    getContext() {
+      return { drawImage() {}, fillRect() {} };
+    },
+    toDataURL() {
+      return 'data:image/jpeg;base64,U1RVQg==';
+    },
     getBoundingClientRect() {
       return { top: 0, left: 0, right: 0, bottom: 0, width: 320, height: 640, x: 0, y: 0 };
     },
@@ -161,22 +168,30 @@ function makeEl(tag = 'div', id = '') {
  * ------------------------------------------------------------------ */
 function makeSupabase(calls, opts) {
   const session = opts.session || null;
-  const tableData = opts.tableData || {};
 
   const query = (table) => {
     const rec = (op, payload) => calls.push({ table, op, payload });
+    // Failure injection: read opts.* LAZILY (per call, not at construction) so
+    // tests can flip opts.writeError / opts.readError / opts.tableData mid-run
+    // via app.opts. Return shape mirrors supabase-js v2: network failures come
+    // back as { error }, they do not throw.
+    const err = (op, payload) => (opts.writeError ? opts.writeError(table, op, payload) : null);
     const chain = {
       select(cols) {
         rec('select', cols);
-        return Promise.resolve({ data: tableData[table] || [], error: null });
+        const e = opts.readError ? opts.readError(table) : null;
+        const td = opts.tableData || {};
+        return Promise.resolve(e ? { data: null, error: e } : { data: td[table] || [], error: null });
       },
       upsert(rows) {
         rec('upsert', rows);
-        return Promise.resolve({ data: rows, error: null });
+        const e = err('upsert', rows);
+        return Promise.resolve(e ? { data: null, error: e } : { data: rows, error: null });
       },
       insert(rows) {
         rec('insert', rows);
-        return Promise.resolve({ data: rows, error: null });
+        const e = err('insert', rows);
+        return Promise.resolve(e ? { data: null, error: e } : { data: rows, error: null });
       },
       update(row) {
         rec('update', row);
@@ -188,7 +203,8 @@ function makeSupabase(calls, opts) {
       },
       in(col, vals) {
         rec('in', { col, vals });
-        return Promise.resolve({ data: null, error: null });
+        const e = err('delete', vals); // .delete().in('id', ids) resolves here
+        return Promise.resolve(e ? { data: null, error: e } : { data: null, error: null });
       },
       eq(col, val) {
         rec('eq', { col, val });
@@ -227,9 +243,15 @@ function makeSupabase(calls, opts) {
     },
     removeChannel: () => {},
     storage: {
-      from: () => ({
-        upload: () => Promise.resolve({ data: {}, error: null }),
-        getPublicUrl: () => ({ data: { publicUrl: 'https://stub/photo.jpg' } }),
+      from: (bucket) => ({
+        upload: (path, blob, o) => {
+          calls.push({ table: '_storage', op: 'upload', payload: { bucket, path } });
+          const e = opts.storageError ? opts.storageError(path) : null;
+          return Promise.resolve(e ? { data: null, error: e } : { data: { path }, error: null });
+        },
+        getPublicUrl: (path) => ({
+          data: { publicUrl: 'https://stub.supabase.co/storage/v1/object/public/' + bucket + '/' + path },
+        }),
       }),
     },
   };
@@ -278,6 +300,7 @@ const LIVE_BINDINGS = [
   'S', 'SNAP', 'TAB', 'jobView', 'USER', 'SYNC_READY', 'sb', 'authMode',
   'jobFilter', 'jobSearch', 'jobsSearch', 'mem', 'STORAGE_OK', 'IC',
   'TABLES', 'MAPS', 'DT', 'SC', 'NAV', 'KEY',
+  'DEAD', 'KV', 'OFFLINE',
 ];
 
 /* ------------------------------------------------------------------ *
@@ -292,6 +315,9 @@ function load(htmlPath, opts = {}) {
   const consoleWarns = [];
   const supabaseCalls = [];
   const timers = [];
+  // window/document listeners, capturable so tests can fire 'online' /
+  // 'visibilitychange'. Document listeners are namespaced 'doc:<type>'.
+  const windowListeners = {};
 
   /* localStorage stub */
   const store = new Map();
@@ -330,7 +356,9 @@ function load(htmlPath, opts = {}) {
     createElement: (t) => makeEl(t),
     createDocumentFragment: () => makeEl('fragment'),
     createTextNode: (t) => ({ textContent: t }),
-    addEventListener() {},
+    addEventListener(t, fn) {
+      (windowListeners['doc:' + t] = windowListeners['doc:' + t] || []).push(fn);
+    },
     removeEventListener() {},
     execCommand: () => true,
     cookie: '',
@@ -494,7 +522,9 @@ function load(htmlPath, opts = {}) {
     innerWidth: 390,
     innerHeight: 844,
     devicePixelRatio: 2,
-    addEventListener: () => {},
+    addEventListener: (t, fn) => {
+      (windowListeners[t] = windowListeners[t] || []).push(fn);
+    },
     removeEventListener: () => {},
     performance: { now: () => 0 },
     process: undefined, // don't leak node's process into app scope
@@ -573,6 +603,16 @@ function load(htmlPath, opts = {}) {
     document,
     evalError,
     charts: Chart._made,
+    opts, // mutate writeError/readError/storageError/tableData mid-test
+    windowListeners,
+    /** Fire captured window listeners, e.g. fireWindow('online'). */
+    fireWindow(type, e) {
+      (windowListeners[type] || []).forEach((fn2) => fn2(e || { type }));
+    },
+    /** Fire captured document listeners, e.g. fireDocument('visibilitychange'). */
+    fireDocument(type, e) {
+      (windowListeners['doc:' + type] || []).forEach((fn2) => fn2(e || { type }));
+    },
     /** Call an app function by name. Throws a clear error if it's missing. */
     call(name, ...args) {
       if (typeof fn[name] !== 'function') {
