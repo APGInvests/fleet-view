@@ -493,7 +493,7 @@ Per HANDOFF §9's production rule and the stubbed-sandbox-qa pattern. The SW **m
 **Files:**
 - Create (temporarily): `sandbox/index.html`, `sandbox/sw.js` — deleted at the end.
 
-**Step 1: Build the sandbox copy.** Copy `index.html` → `sandbox/index.html`, then in the copy: (a) replace the `sb` client creation with an in-memory stub (same shape the harness uses — writes impossible by construction), (b) fake the session so the auth gate never shows, (c) namespace the localStorage keys, (d) insert a loud fixed banner `SANDBOX — NOT CONNECTED TO REAL DATA`. Copy `sw.js` → `sandbox/sw.js` unchanged. The relative registration confines its scope to `/fleet-view/sandbox/`.
+**Step 1: Build the sandbox copy.** Copy `index.html` → the drill location, then in the copy: (a) replace the `sb` client creation with an in-memory stub (same shape the harness uses — writes impossible by construction), (b) fake the session so the auth gate never shows, (c) namespace the localStorage keys (`fleetview_*` → `fvdrill_*`), (d) insert a loud fixed banner `SANDBOX — NOT CONNECTED TO REAL DATA`. Copy `sw.js` and rewrite the cache prefix **`fv-sw-` → `fv-drill-` throughout** (VERSION *and* both deletion-filter literals). **Why: every GitHub Pages project site shares the `https://apginvests.github.io` origin — Cache Storage, localStorage, and IndexedDB are all shared with production.** Distinct prefixes + prefix-scoped deletion is what makes drill/production isolation real; the relative registration only confines the SW's *fetch* scope to the drill path. Once Phase 3 lands, the drill build must also rewrite the IndexedDB name (`fleetview` → `fleetview-drill`) for the same reason.
 
 **Step 2: Deploy the sandbox:** `git add sandbox && git commit -m "Temporary SW sandbox" && git push`. Wait for Pages.
 
@@ -586,6 +586,8 @@ async function hydrateFromCache(){try{const c=await KV.get('cache');if(!c||c.v!=
 ```
 
 Wire-up: `save()` additionally calls `persistCache()`. `doSignOut()` calls `KV.del('cache')` before `signOut()` (shared devices must not leak the fleet to the next account). `boot()` integration lands in Task 3.5.
+
+> **Same-origin note:** the `indexedDB.open('fleetview', …)` database name is origin-shared with any drill/sandbox copy hosted under `apginvests.github.io` — a drill build must rewrite it (`fleetview` → `fleetview-drill`), exactly like the localStorage keys and the SW cache prefix (see Task 2.4 Step 1).
 
 **Step 4: Run to verify pass**, full sweep green. **Step 5: Commit** — `git commit -m "Durable cache: KV wrapper, S+SNAP+dead-letter persisted, hydrate"`
 

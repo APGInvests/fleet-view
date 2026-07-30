@@ -18,6 +18,7 @@ module.exports = (app, t) => {
   t.includes(src, 'const KILL', 'kill switch constant present');
   t.includes(src, 'registration.unregister', 'kill path unregisters');
   t.includes(src, 'caches.delete', 'kill path clears caches');
+  t.includes(src, "startsWith('fv-sw-')", 'cache deletion scoped to our prefix (Cache Storage is origin-scoped)');
   t.includes(src, 'SKIP_WAITING', 'skip-waiting message handler present');
   t.includes(src, "req.mode === 'navigate'", 'navigations handled');
   t.excludes(src, 'supabase', 'SW never touches Supabase requests');

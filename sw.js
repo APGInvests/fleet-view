@@ -24,14 +24,21 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
+    /* caches.keys() is ORIGIN-scoped, not SW-scope-scoped — and ALL GitHub Pages
+       project sites share https://apginvests.github.io, so a drill under another
+       path is the SAME origin as production. Both deletion paths filter to our
+       'fv-sw-' prefix, and a drill copy must rewrite that prefix (fv-drill-)
+       throughout — VERSION and both filters — so its caches can never touch
+       ours. Same-origin sharing also applies to localStorage (namespaced in the
+       drill build) and, once Phase 3 lands, the IndexedDB database name. */
     if (KILL) {
       const ks = await caches.keys();
-      await Promise.all(ks.map((k) => caches.delete(k)));
+      await Promise.all(ks.filter((k) => k.startsWith('fv-sw-')).map((k) => caches.delete(k)));
       await self.registration.unregister();
       return;
     }
     const ks = await caches.keys();
-    await Promise.all(ks.filter((k) => k !== SHELL && k !== CDN).map((k) => caches.delete(k)));
+    await Promise.all(ks.filter((k) => k.startsWith('fv-sw-') && k !== SHELL && k !== CDN).map((k) => caches.delete(k)));
     await self.clients.claim();
   })());
 });
