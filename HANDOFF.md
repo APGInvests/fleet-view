@@ -1,0 +1,355 @@
+# FleetView — Developer Handoff
+
+**Status:** live and in beta use by a real crew. Treat the data as production.
+**Live URL:** https://apginvests.github.io/fleet-view/
+**Repo:** `APGInvests/fleet-view` (name is case-sensitive), GitHub Pages from `main`, root.
+**This document assumes no prior context.** Written 2026-07-29.
+
+---
+
+## 1. What this is
+
+A mobile-first web app for a temporary-power company that rents and deploys **generators** to large festivals and events. Crews track, per show, where every unit is and how it's running.
+
+The problem it solves: a generator's status normally travels only by text, photo, or word of mouth. FleetView turns that into shared, timestamped, location-aware data that any crew member, the crew chief, or the owner (from an office) can see live — and that carries across shifts without a verbal handoff.
+
+Primary users: field technicians, a crew chief, and the owner. Multi-user, one shared dataset per company.
+
+---
+
+## 2. Architecture
+
+**One self-contained file.** `index.html` (~130 KB) contains all markup, CSS and JavaScript. Vanilla JS. **No build step, no bundler, no package.json.** Editing the app means editing that one file. This is deliberate: the whole app is one deployable artifact you can diff, verify and roll back in a single operation.
+
+**Libraries, all from CDN** (no local deps):
+
+| Library | Version | Used for |
+|---|---|---|
+| Leaflet | 1.9.4 | maps |
+| Leaflet.markercluster | 1.5.3 | pin clustering / spiderfy |
+| html5-qrcode | 2.3.8 | barcode + QR scanning |
+| qrcodejs | 1.0.0 | generating a QR for the app link |
+| Chart.js | 4.4.1 | **loaded but currently unused** — see §7 |
+| @supabase/supabase-js | v2 | backend client |
+
+**State model.** A single in-memory object `S`:
+
+```
+S = { settings, shops[], shows[], units[], reports[], issues[], movements[], currentShowId }
+```
+
+Render functions read `S` and rebuild DOM via template strings. There is no framework and no virtual DOM — `render()` rewrites the view container.
+
+**Build marker.** An HTML comment near `<title>`:
+`<!-- fleetview build 2026-07-29 serial-caps -->`
+Bump it on every deploy. See §9.
+
+---
+
+## 3. Sync layer (read this before touching data code)
+
+Backend is **Supabase** (hosted Postgres + Auth + Realtime).
+
+```
+const SUPA_URL = 'https://eujgglfcpdfgskyqfggg.supabase.co'
+createClient(SUPA_URL, SUPA_KEY, { auth: {
+  persistSession: true, autoRefreshToken: true, detectSessionInUrl: false
+}})
+```
+
+`SUPA_KEY` is the **anon/publishable** key and is intentionally embedded in the client. That is safe — row-level security is what protects the data. Do not put the Supabase *personal access token* (used for migrations) anywhere in this repo.
+
+**Synced tables:**
+```
+const TABLES = ['shops','shows','units','reports','issues','movements']
+```
+A `profiles` table also exists in the database (populated by a new-user trigger) but is **not currently loaded or used by the client**.
+
+**How sync works — diff-based, not per-field:**
+
+1. Code mutates `S` directly (e.g. `S.reports.push(...)`).
+2. `save()` writes UI settings to `localStorage` and calls `scheduleFlush()`.
+3. `scheduleFlush()` debounces **450 ms** → `flush()`.
+4. `flush()` diffs each `S` array against a snapshot (`SNAP`), upserts rows that changed, deletes rows that disappeared, then re-snapshots.
+5. A Realtime `postgres_changes` subscription calls `scheduleReload()`, debounced **800 ms** → `loadAll()` + `render()`, so other devices update without a refresh. It defers if a flush is in flight.
+6. `loadAll()` does `select('*')` on every table in `TABLES`.
+
+**Field naming.** The app uses camelCase; the database uses snake_case. `MAPS` holds a per-table mapping plus which keys are datetimes:
+
+```
+MAPS = { units: { m: { appKey: 'db_col', ... }, dt: ['createdAt','updatedAt'] }, ... }
+```
+`toRow()` / `fromRow()` convert both directions, including **JS milliseconds ↔ ISO timestamps** for keys listed in `dt`.
+
+> **If you add a field to a synced object you must add it to `MAPS`, or it will silently never persist.** This is the single easiest way to break this app.
+
+**IDs.** `uid()` returns `crypto.randomUUID()`. All primary keys are UUIDs.
+
+**localStorage keys** (device-local, never synced): `fleetview_settings_v1` (UI settings), `fleetview_favs` (per-person starred jobs).
+
+**RLS posture.** Policies are `for all to authenticated using(true) with check(true)` — *any* authenticated user shares one fleet. There is no per-user or per-role restriction. Auth is email + password with auto-confirm enabled (no confirmation email step).
+
+---
+
+## 4. The two-layer data model (most important design decision)
+
+Every unit has **two kinds of information**, and conflating them is the bug this model exists to prevent.
+
+### Layer 1 — Fleet identity (travels with the asset forever)
+
+Lives as top-level columns on `units`. Follows the machine from show to show for its whole life.
+
+| Field | Notes |
+|---|---|
+| `serial` | **The primary identity.** What people say out loud. Stored UPPERCASE. |
+| `tagId` | Optional *scan code* — only used when a barcode sticker's number differs from the serial. Not a second identity. |
+| `klass` | `'big'` \| `'small'` (equipment class) |
+| `make`, `model` | |
+| `kw` | Rating in **kVA** (field name is legacy) |
+| `breakerSize`, `fuelType`, `tankGallons`, `weightLbs` | |
+| `currentHours`, `serviceDueHours` | service tracking |
+| `opStatus` | `'staged'` \| `'running'` \| `'down'`. **New units default to `staged`.** |
+| `photos` | array of base64 data URIs (see §7) |
+| `notes` | |
+| `locationType` | `'show'` \| `'shop'` \| `'transit'` \| `'fleet'` |
+| `locationId` | show id / shop id / null |
+| `inTransitToShowId` | destination while `locationType==='transit'` |
+
+`locationType: 'fleet'` means **unassigned** — in the registry but not on any job. Displayed as "Unassigned".
+
+### Layer 2 — Per-job label (`jobMeta`, must NOT travel)
+
+`units.job_meta` is a **jsonb map keyed by show id**:
+
+```json
+{ "<showId>": { "name": "Coca-Cola stage", "area": "VIP South", "note": "..." } }
+```
+
+- `name` — free text, what it powers on *this* job
+- `area` — the placement on *this* job
+- `note` — job-specific note
+
+**These must never follow the asset to its next show.** A unit called "Coca-Cola stage" at one festival is something else entirely at the next one. Helpers: `jm(u, showId)`, `placeOf(u, showId)`, `assetLabel(u, showId)`.
+
+### Append-only history
+
+`reports` (vital-sign checks), `issues`, and `movements` are **append-only** — new rows, never edits. Each is stamped with `techName` and a timestamp. This is what makes shift handoff work and what will make offline sync tractable.
+
+### Location has exactly one authoritative writer
+
+`unitGps(u)` derives a unit's map pin **only from `movements`**. Reports and issues store `gps: null` by design.
+
+> This was a real production bug: the pin used to take the newest GPS from *any* attached record, so filing a status report from another state teleported the generator onto the reporter. See §8, rule 1.
+
+---
+
+## 5. Information architecture as shipped
+
+**Bottom nav:** Jobs · Fleet · Map · Alerts, plus a floating **+ Add** button.
+
+**Gesture contract — identical on every list:**
+| Gesture | Meaning |
+|---|---|
+| tap | open the thing |
+| swipe **right** | show it on the map |
+| swipe **left** | remove it *from this context* |
+
+### Jobs
+List with search (name/location), per-person favorites (star pins to top), and health chips (unit count, down, overdue, last activity). Swipe left = **Delete job** — *refused while the job still has units on it*. Swipe right = that job's map.
+
+### Job detail
+Header buttons: Map · Log · Report. Search + filter chips (All / Big iron / Small iron / Down / Low fuel / Service). Unit cards sorted by **kVA ascending, with hard-down units forced to the bottom** (crews doing rounds need runnable units on top; a known-broken unit is noise). Card swipe left = **Off job**; swipe right = its map pin.
+
+### Unit detail — five tabs
+- **Vitals** — Latest check card (hero) → **Recent checks** comparison table → **Check log**. The comparison table is rows = V L-L, Amps L1/L2/L3, Coolant °, Oil psi, Load %; columns = last 4 checks, newest first; neutral **▲/▼** vs the previous check. Neutral on purpose: for these measures "up" is not universally good or bad.
+- **Issues** — severity `cosmetic` / `maintenance` / `down`, with photos, resolvable.
+- **Service** — hours remaining vs `serviceDueHours`, mark-serviced.
+- **Info** — specs, Serial then Scan code, photos, Edit.
+- **Placement** — per-job name/placement/note, capture placement (GPS), adjust pin on map, move / mark en route.
+
+### Log check form
+Volt L-L / L-N, Amps L1/L2/L3, Hz, Load kW, Coolant temp, Oil psi, Fuel %, Batt V, DEF %, Engine hrs, Condition notes, Status.
+- **Load % is derived, not entered:** `round(loadKw / (kVA × 0.8) × 100)`, shown live under Load kW with the formula visible. 0.8 is assumed power factor, so the divisor is *rated kW*.
+- The status selector **pre-selects the unit's current status** — it does not default to "Running" (see §8, rule 3).
+- Every field is optional.
+
+### Fleet
+The global registry — every asset the company owns, wherever it is. Search + filters. Sorted like the job list. Swipe left = **Delete from fleet** (confirm-gated). This is the *only* place delete lives.
+
+### Map
+"This job / All locations" toggle. Clustered status-coloured pins + a venue marker. Marker popup is deliberately minimal: **area** (bold), model · #serial, status dot + label, then three actions — **Open**, **Move** (drag the pin), **📍 Set to my location**.
+
+### Alerts
+Sections: Hard down · Service due/over · Low fuel · Overdue for a check. The nav badge counts **distinct units**, so it is lower than the sum of section counts (a unit can appear in several sections).
+
+### Add flow (`+ Add`)
+Scan a barcode/QR **or** type a serial → **searches the whole fleet first**:
+- already in the fleet → offer to move it onto this job (no duplicate)
+- already on this job → just open it
+- no match → **+ Add new asset**, serial prefilled
+
+The destination chooser leads with the **last 3 destinations** as one-tap buttons, then all jobs/shops, then **+ New job** / **+ New shop** (create a destination without leaving the flow), then **↩ Back to fleet (unassign)**. After a scan-assign it **loops straight back to the scanner** so a crew can load a truck in a scan-tap rhythm — including interleaving two trucks bound for two different shows.
+
+Scanner reads **1D barcodes and QR** (Code-128/39/93, ITF, Codabar, EAN/UPC, QR, DataMatrix), uses the native detector where available, has a wide scan window sized for linear codes, a torch toggle, and a manual type-in fallback.
+
+### Status colours
+green = running · yellow = cosmetic issue · orange = service due/over or low fuel · red = hard down · grey = staged · blue = in transit. Every card also shows **freshness** (time since last check) — stale data is its own status.
+
+### Auth
+Login-first screen (email + password). A toggle reveals First/Last name for account creation. Display name is "First L." — logs are stamped by name, never email.
+
+### Settings
+Theme (dark/daylight), home tab, stale-check hours, service-due warn hours, service email, load/remove sample data, **Reset ALL data**, export backup, sign out.
+
+---
+
+## 6. Deliberately cut — do not "restore" these
+
+The owner repeatedly declined features to keep the app usable. Every item below was considered and cut **on purpose**:
+
+- Truck **loadout** screen
+- **Service planner** module
+- **Global** activity log (per-job log kept)
+- Shops "what's on hand" inventory module
+- **Air conditioners** / second asset type (deferred, not forgotten)
+- A **"quick check"** short version of the vitals form — *people would only ever use the quick one, losing the data the full one exists to collect*
+- Refuel **prediction**
+- Paralleling-link tracking
+- **Autofill/prefill of vital readings** — see §8, rule 2
+- Push / SMS / email alerting infrastructure (in-app Alerts is enough)
+- Roles & permissions
+- CSV import/export
+
+> Before adding a feature, check this list and §10. The bar is: does a tired tech on a phone need this in the core loop?
+
+---
+
+## 7. Known issues & technical debt
+
+**Chart.js is loaded but unused.** The vitals view originally used stacked multi-axis charts; they were unreadable (metrics with wildly different ranges cannot share a chart honestly) and were replaced by the Recent-checks table. `drawTrend()` still exists but is never called. Safe to delete along with the CDN tag.
+
+**Photos are base64 inside table rows.** `loadAll()` does `select('*')`, so every full read — *including every realtime-triggered reload* — pulls all photo bytes. At ~50 units × 3 photos this is multi-megabyte and reads to users as "the app is broken" on festival LTE. A `unit-photos` storage bucket already exists in Supabase but is unused. **Highest-value technical fix on this list:** move photos to storage and keep URLs in rows, or at minimum exclude photos from the list-view read path.
+
+**`closeSheet()` unconditionally calls `render()`.** Closing even a read-only sheet rebuilds the whole view and re-initialises Leaflet on the map tab. Will flash/scroll-jump as data grows. Fix: a `dirty` flag on `sheet()`.
+
+**No service worker.** An installed home-screen app can serve a stale document indefinitely. Expect "I deployed it but I don't see the change" — hand out a `?v=…` cache-busted link. Adding a service worker fixes updates but trades instant updates for a tap-to-update model that must be explained to the crew.
+
+**"Reset ALL data" is under-protected.** It sits inline in Settings just after Save, guarded only by a native `confirm()`. It wipes every job, asset, check and issue **for the whole team**. Should be behind a separate danger-zone sheet with a typed confirmation and a count of what will be destroyed.
+
+**Tap targets below guideline.** `.closex` is 34 px; `.backbtn` has `padding:0` around a 16 px SVG (~20 px effective). Should be ≥44 px — users wear gloves.
+
+**No way to edit a job from the job screen.** `editShow()` exists but is unreachable from job detail; the jobs-list swipe only offers Delete.
+
+**Fleet search ignores placement/area/location.** Job-detail search includes them; the fleet-wide search only matches tag/serial/make/model. Techs look for "VIP South".
+
+**`addShop()` uses `window.prompt()`** — the only unstyled dialog left. `quickAddShop()` is the styled equivalent that already exists.
+
+**`moveMenu()` lists every job and shop with no filter.** Recents cover the common case, but this grows unusable mid-season.
+
+**Alerts group by severity only.** With several shows live, the owner cannot tell at a glance which show is in trouble. Sub-grouping by job would fix it.
+
+---
+
+## 8. Standing rules — do not violate these
+
+These were each learned the hard way, several from production bugs.
+
+1. **Status is not placement.** Reporting on a unit must never move it. Only explicit placement actions write location, and `unitGps()` reads only `movements`. This protects a workflow that matters: the office marking a unit down on behalf of someone who doesn't have the app, without corrupting the map.
+2. **Never autofill a measured value.** Prefilled readings let someone save without observing — that manufactures plausible-looking data and incentivises faking, which is worse than missing data because missing data is visibly missing. Blank fields force eyes on the gauge. *Pre-selecting a non-measurement is fine* (a destination picker seeded with recents; a status control starting on the unit's current status) because that prevents an unintended change rather than inventing an observation.
+3. **Defaults must be honest.** Units start `staged` and become `running` only when a human records it. The log-check status selector starts on the unit's *current* status — it must not default to "Running", or every skipped selector becomes a false claim of health.
+4. **Serials are alphanumeric** (e.g. `A246B12359`). The Serial and Scan-code fields must stay `type="text"` with a full keyboard. **Never add `inputmode`/numeric keypad to them** to fix the iOS keyboard flip — it would break real entry. They force uppercase and normalise on save instead. Numeric keypads belong only on genuinely numeric fields (24 of them have `inputmode="decimal"`).
+5. **Destructive actions are placed by blast radius, not verb.** Delete-from-fleet lives *only* on the Fleet surface. The job surface offers Off-job only. Job delete refuses while units remain. A native confirm is the last line of defence, never the plan.
+6. **Every field optional; never force a photo** on a routine capture.
+7. **One gesture, one meaning, everywhere** (§5). Never let a gesture mean different things on two lists.
+8. **Neutral trend indicators.** ▲/▼ in grey, never red/green, when "up" isn't universally good — fuel dropping is normal, oil pressure dropping is not. Colour implies a judgement the data can't support.
+9. **Sort for the next action.** Actionable items on top, parked items sink — even problems.
+10. **Friction is the main risk.** An extra tap in a high-frequency path is a defect, not a polish item; an unused tool produces no data at all.
+11. **Any feature that groups/routes by a text label needs a controlled vocabulary first.** Free text never clusters ("medical" / "Medical Tent" / a cross street all mean one place). This is why zone-scoped alerts are unbuilt — see §10.
+
+---
+
+## 9. Ship-verify loop (follow this for every change)
+
+There is no test suite and no CI. This discipline replaces both, and it is why a very large number of changes shipped without accumulating bugs.
+
+1. **Read the real current code** for the lines you're changing. Never edit from memory — the file drifts.
+2. Make **one logical change**.
+3. **Syntax check.** Extract the inline `<script>` and parse it:
+   ```bash
+   node -e "const fs=require('fs'),vm=require('vm');
+   const s=/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/i
+     .exec(fs.readFileSync('index.html','utf8'))[1];
+   new vm.Script(s); console.log('syntax OK')"
+   ```
+4. **Behaviour-test the changed path with real assertions** — the expected value, the full expected sort order, the stored value read back. *Not* "it didn't throw." A sort bug that put missing values first passed every crash check and failed one order assertion. (Root cause worth remembering: `Number(null) === 0`, not `NaN`.)
+5. **Regression sweep** every top-level render entry point (`renderJobsList`, `renderJobDetail`, `renderFleet`, `renderAlerts`, `renderMapScreen`, `unitCard`, the `pane*` functions) against **empty**, **populated**, and **edge** state — null fields, references to deleted records, quotes/emoji in strings, one item, many items.
+6. **Bump the build marker.**
+7. **Deploy** (push `index.html` to `main`).
+8. **Verify live:** fetch the URL and assert the marker is present. Only now is it shipped.
+   ```bash
+   curl -s -L "https://apginvests.github.io/fleet-view/?v=$(date +%s)" | grep -o "fleetview build [0-9-]* [a-z+-]*"
+   ```
+9. **Record** what changed.
+
+### Headless harness notes
+Run the extracted script in a Node `vm` context with fake globals (`document`, `localStorage`, `navigator`, `crypto`, `matchMedia`, `location`, `scrollTo`) and stubs for `supabase.createClient`, `L`, `Chart`, `QRCode`, `Html5Qrcode`. Pitfalls that produce **fake** failures — rule these out before believing a bug:
+- module-scope `let`/`const` do **not** attach to the global object (only function declarations do). Append an epilogue *inside* the script exposing internals, e.g. `globalThis.__t = { getS:()=>S, setS:v=>{S=v} }`.
+- callback-style stubs (geolocation, FileReader) must actually invoke their callbacks, or continuations never run.
+- incomplete DOM fakes crash startup and read as app bugs. Use permissive Proxy-based element fakes.
+
+### Testing against production — don't
+The database holds real crew records. To click through the live app safely, build an isolated copy: replace the Supabase client with an in-memory stub (so writes are impossible), fake the session, namespace localStorage, add a visible "SANDBOX — NOT CONNECTED TO REAL DATA" banner, deploy it to a **separate filename**, drive it, then delete it and verify the deletion returns 404. Never point a click-through at production.
+
+### Deploy gotchas
+- **Anonymous GitHub API reads are rate-limited to 60/hour** and *will* die mid-session during iterative deploys. The tell: failure tracks request volume, not payload. Reuse the file SHA returned by the previous authenticated write instead of re-reading it.
+- Writes can succeed against a renamed repo while **Pages paths 404** — git forgives renames, static hosting doesn't. The repo slug is `fleet-view`.
+
+---
+
+## 10. Roadmap / open follow-ups
+
+Ordered roughly by value. All are unbuilt and all were deliberately deferred — the owner froze scope to drive crew adoption first.
+
+**Tail of phase 1**
+1. **Offline-tolerant field mode.** Show sites have dead zones, which is exactly when the app matters. Sequence: (a) service worker caching the app shell so it *opens* offline, (b) cache last-loaded data so it has something to *show*, (c) outbox queue for writes, replayed on reconnect. Conflict rule: append-only records keep both and order by timestamp; only editable spec fields need last-write-wins. All client-side — no backend change. **Greenlight before the next show with known bad signal.**
+2. **"What's on my show" report / manifest.** One tap on a job → shareable roster (serial, kVA, placement, status, hours, open issues) + totals, with copy/email/CSV. This is the owner's stated payoff: proof of what was sent to a show without driving around collecting serials. Doubles as the end-of-show punch list for the service department.
+3. **Job overview strip** — live tiles (on-site / running / down / overdue / total kVA / avg load) + a needs-attention shortlist, for monitoring from an office.
+
+**Phase 2**
+4. **Sizing insight from load %** — flag units consistently under ~30% (oversized → downsize) or over ~85% (→ upsize/parallel). Uses data already captured.
+5. **Runtime per show** — hours-run delta from logged engine hours.
+6. **Fast-load actions** — optional "lock to this destination" for single-truck scanning, receive-a-truckload, multi-select move.
+7. **Photos → Supabase Storage** (see §7).
+8. **CSV import/export** — bulk-load an existing fleet; export the manifest.
+
+**Phase 3**
+9. **Zone-scoped alerts.** A project manager defines a job's zone list (~12 max); crew claim zones and receive only their zone's units and alerts. Value: shift handoff (morning/swing/night read the same zone log with no verbal handoff) and accountability (nobody checks 96 units; a tech assigned 12 does). **Blocked until zones are a defined pick-list, not free text** — see §8 rule 11. Requires a small migration (zone list + zone→owner map on the show), wiring the unused `profiles` table for names, and scoping the Alerts screen + badge.
+10. **Air conditioners / other asset types** — the company supplies these too. Lightweight: photos, condition, placement, simpler vitals.
+11. **Roles** (tech vs office/manager) and a real per-unit service history.
+
+**Small, already-scoped**
+- Show-days field on a job + "Day 2 of 4" on the card (needs a one-line `shows.days` migration).
+- Archive jobs — as a **button in job detail plus an Archived filter**, deliberately *not* a third swipe direction.
+- The §7 debt list.
+
+---
+
+## 11. Constraints & operational notes
+
+- **Repo name is case-sensitive:** `fleet-view`. Pages URLs will 404 on the wrong casing even when pushes succeed.
+- The connected GitHub integration used to build this **can push files but cannot create/rename repos or change repo/Pages settings** — those are manual.
+- **Supabase migrations** are applied via the Management API: `POST /v1/projects/{ref}/database/query` with `{"query": "alter table ... add column if not exists ..."}`. Keep every statement idempotent. Two gotchas: the API sits behind Cloudflare and returns **403 `error code: 1010`** for a default `Python-urllib` User-Agent (send a browser `User-Agent` + `Accept: application/json`), and instant signup requires `PATCH /v1/projects/{ref}/config/auth` with `{"mailer_autoconfirm": true}` (already set).
+- The **Supabase personal access token** is only ever entered into a secure credential field. It must never appear in this repo, in chat, or in the client. The **anon key in `index.html` is public-safe** by design.
+- Supabase free tier allows ~2 active projects per org.
+- **Camera, geolocation and persistent storage are denied — silently, with no permission prompt — on sandboxed/CSP-iframe origins.** Always test hardware features on the real Pages origin. The tell for this class of bug is *the absence of a prompt*: a denied permission throws, a blocked origin says nothing.
+- Project ref `eujgglfcpdfgskyqfggg`; Supabase project name `fleetview`.
+
+---
+
+## 12. Quick orientation for a new developer
+
+1. Clone the repo. There is nothing to install — open `index.html`.
+2. Read §3 (sync), §4 (two-layer model) and §8 (standing rules) before changing anything. Those three sections encode every expensive lesson.
+3. To see the app with data, sign in and use **Settings → Load sample data**.
+4. Make your first change following §9 end to end, including the live verification step.
+5. Do not restore anything in §6 without asking.
