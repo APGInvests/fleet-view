@@ -642,7 +642,7 @@ function rmDraftPhoto(i){draftPhotos.splice(i,1);const el=$('#issuePhotoStrip');
 function bigDraftPhoto(i){bigPhoto(draftPhotos[i]);}
 function renderUnitPhotos(u){return photoStrip(u.photos||[],"bigUnitPhoto('"+u.id+"',","rmUnitPhoto('"+u.id+"',");}
 function handleUnitPhoto(inp,unitId){const f=inp.files[0];if(!f)return;compressImage(f,d=>{const u=unitById(unitId);if(!u.photos)u.photos=[];u.photos.push(d);if(!persistOrWarn(()=>u.photos.pop()))return;u.updatedAt=now();renderUnit(unitId);toast('Photo added');});inp.value='';}
-function rmUnitPhoto(unitId,i){const u=unitById(unitId);if(u&&u.photos)u.photos.splice(i,1);save();renderUnit(unitId);}
+function rmUnitPhoto(unitId,i){const u=unitById(unitId);if(u&&u.photos){u.photos.splice(i,1);u.updatedAt=now();}save();renderUnit(unitId);}
 function bigUnitPhoto(unitId,i){const u=unitById(unitId);if(u&&u.photos)bigPhoto(u.photos[i]);}
 function bigIssuePhoto(iid,i){const is=S.issues.find(x=>x.id===iid);if(is&&is.photos)bigPhoto(is.photos[i]);}
 /* ===== MOVEMENTS ===== */
