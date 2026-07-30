@@ -265,6 +265,12 @@ Hook: first line inside `flush()`'s `try` block: `await syncPendingPhotos();` (b
 
 ### Task 1.3: Migrate existing production photos
 
+> **Ordering (decided 2026-07-29): run this AFTER the production push, not before.**
+> While the old app is still deployed, any open session holding base64 photos in
+> memory can flush them back over a migrated row, and the old app can't self-heal.
+> The new app converts any data URI it finds on its next flush, so
+> push-then-migrate is self-correcting; migrate-then-push is not.
+
 **Files:**
 - Create: `tools/fv_migrate_photos.js`
 
