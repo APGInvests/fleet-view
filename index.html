@@ -184,6 +184,7 @@
   .checkrow input[type=checkbox]{width:22px;height:22px}
   .toast{position:fixed;bottom:calc(96px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--surface2);color:var(--ink);padding:12px 18px;border-radius:12px;font-weight:600;font-size:14px;z-index:2200;box-shadow:0 8px 24px rgba(0,0,0,.5);opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%;text-align:center;border:1px solid var(--line);font-family:var(--mono)}
   .toast.on{opacity:1}
+  #updateBar{position:fixed;top:calc(env(safe-area-inset-top) + 8px);left:50%;transform:translateX(-50%);z-index:2300;background:var(--accent);color:#fff;border:none;border-radius:999px;padding:10px 18px;font-family:var(--mono);font-size:12px;font-weight:700;box-shadow:var(--shadow);cursor:pointer}
   a{color:var(--accent)}
   .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
   hr.sep{border:none;border-top:1px solid var(--line);margin:16px 0}
@@ -249,6 +250,7 @@
   <div class="sheet" id="sheet"><div class="sh-body">…</div></div>
 </div>
 <div class="toast" id="toast"></div>
+<button id="updateBar" style="display:none" onclick="applySwUpdate()">Update ready — tap to refresh</button>
 <div id="photoOverlay" onclick="this.classList.remove('on')"><img id="photoBig" alt=""/></div>
 <div id="authgate">
   <div class="au-card">
@@ -619,9 +621,19 @@ function persistOrWarn(undo){save();return true;}
 function isDataURI(p){return typeof p==='string'&&p.slice(0,5)==='data:';}
 function dataURItoBlob(d){const i=d.indexOf(',');const mime=(d.slice(0,i).match(/data:(.*?)(;|$)/)||[])[1]||'image/jpeg';const bin=atob(d.slice(i+1));const arr=new Uint8Array(bin.length);for(let k=0;k<bin.length;k++)arr[k]=bin.charCodeAt(k);return new Blob([arr],{type:mime});}
 const PHOTO_FLUSH_CAP=6,PHOTO_UPLOAD_MS=8000;
-const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),ms))]);
+/* Timeout ABORTS the request (AbortController), not just abandons it — otherwise
+   hanging uploads accumulate across flush passes and the cap only bounds launches,
+   not concurrent in-flight requests. Known, accepted edge (same bucket as orphan
+   debt, NOT a bug to rediscover): an upload that times out client-side but lands
+   server-side anyway orphans a Storage object, and the retry uploads a duplicate
+   under a fresh uid path. Rows only ever reference the copy that acked in time. */
 async function syncPendingPhotos(){const jobs=[];S.units.forEach(o=>{(o.photos||[]).forEach((p,i)=>{if(isDataURI(p))jobs.push({o,i,path:'units/'+o.id+'/'+uid()+'.jpg'});});});S.issues.forEach(o=>{(o.photos||[]).forEach((p,i)=>{if(isDataURI(p))jobs.push({o,i,path:'issues/'+o.id+'/'+uid()+'.jpg'});});});
-  for(const j of jobs.slice(0,PHOTO_FLUSH_CAP)){try{const {error}=await withTimeout(sb.storage.from('unit-photos').upload(j.path,dataURItoBlob(j.o.photos[j.i]),{contentType:'image/jpeg'}),PHOTO_UPLOAD_MS);if(error)continue;const {data}=sb.storage.from('unit-photos').getPublicUrl(j.path);if(data&&data.publicUrl)j.o.photos[j.i]=data.publicUrl;}catch(e){}}}
+  for(const j of jobs.slice(0,PHOTO_FLUSH_CAP)){const ctl=(typeof AbortController!=='undefined')?new AbortController():null;let tm=null;
+    try{const up=sb.storage.from('unit-photos').upload(j.path,dataURItoBlob(j.o.photos[j.i]),{contentType:'image/jpeg',signal:ctl?ctl.signal:undefined});
+      const {error}=await Promise.race([up,new Promise((_,rej)=>{tm=setTimeout(()=>{if(ctl)ctl.abort();rej(new Error('timeout'));},PHOTO_UPLOAD_MS);})]);
+      clearTimeout(tm);if(error)continue;
+      const {data}=sb.storage.from('unit-photos').getPublicUrl(j.path);if(data&&data.publicUrl)j.o.photos[j.i]=data.publicUrl;}
+    catch(e){clearTimeout(tm);}}}
 function bigPhoto(src){$('#photoBig').src=src;$('#photoOverlay').classList.add('on');}
 function photoStrip(items,vp,rp){return `<div class="photostrip">${items.map((p,i)=>`<div class="ph"><img src="${p}" onclick="${vp}${i})"/>${rp?`<button class="rm" onclick="${rp}${i})">✕</button>`:''}</div>`).join('')}</div>`;}
 function renderDraftStrip(){return draftPhotos.length?photoStrip(draftPhotos,'bigDraftPhoto(','rmDraftPhoto('):'<p class="muted" style="font-size:12px;margin:2px 0 8px">No photos added.</p>';}
@@ -740,6 +752,17 @@ function wipe(){if(!confirm('Erase everything?'))return;S=blankState();save();cl
 let onSheetClose=null;
 function sheet(title,html,onClose,noPad){onSheetClose=onClose||null;$('#sheet').innerHTML=`<div class="sh-top"><h3>${esc(title)}</h3><button class="closex" onclick="closeSheet()">✕</button></div><div class="sh-body" ${noPad?'style="padding-top:14px"':''}>${html}</div>`;$('#overlay').classList.add('on');}
 function closeSheet(){if(onSheetClose){try{onSheetClose();}catch(e){}onSheetClose=null;}$('#overlay').classList.remove('on');render();}
+/* ===== SERVICE WORKER (tap-to-update; kill switch lives in sw.js) ===== */
+let swReg=null,swReloaded=false;
+function initSW(){if(!('serviceWorker' in navigator)||location.protocol!=='https:')return;
+  navigator.serviceWorker.register('sw.js').then(reg=>{swReg=reg;
+    if(reg.waiting)swUpdateReady();
+    reg.addEventListener('updatefound',()=>{const nw=reg.installing;if(!nw)return;
+      nw.addEventListener('statechange',()=>{if(nw.state==='installed'&&navigator.serviceWorker.controller)swUpdateReady();});});
+  }).catch(()=>{});
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(swReloaded)return;swReloaded=true;location.reload();});}
+function swUpdateReady(){const b=$('#updateBar');if(b)b.style.display='';}
+function applySwUpdate(){if(swReg&&swReg.waiting)swReg.waiting.postMessage('SKIP_WAITING');const b=$('#updateBar');if(b)b.style.display='none';}
 /* ===== THEME ===== */
 function applyTheme(){const t=(S.settings&&S.settings.theme==='light')?'light':'dark';document.documentElement.setAttribute('data-theme',t);const b=$('#themeBtn');if(b)b.textContent=t==='light'?'🌙':'☀️';const m=document.querySelector('meta[name=theme-color]');if(m)m.setAttribute('content',t==='light'?'#fffdf7':'#191714');}
 function toggleTheme(){S.settings.theme=(S.settings.theme==='light')?'dark':'light';save();applyTheme();toast(S.settings.theme==='light'?'☀️ Daylight':'🌙 Dark');}
@@ -751,7 +774,7 @@ function removeSampleData(){const ids=new Set(S.shows.filter(s=>(s.name||'').sta
 
 /* ===== INIT ===== */
 buildNav();$('#logoIc').innerHTML=IC.bolt;$('#fabScan').innerHTML=IC.plus+'<span>Add</span>';var _al=$('#au_logo');if(_al)_al.innerHTML=IC.bolt;
-loadSettings();applyTheme();
+loadSettings();applyTheme();initSW();
 try{sb.auth.onAuthStateChange((ev)=>{if(ev==='SIGNED_OUT')showAuth();});}catch(e){}
 (async function init(){try{await boot();}catch(e){showAuth();authMsg('Connection problem — check your network and retry.');}})();
 </script>

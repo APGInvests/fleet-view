@@ -39,7 +39,7 @@
   ```bash
   curl -s -L "https://apginvests.github.io/fleet-view/?v=$(date +%s)" | grep -o "fleetview build [0-9-]* [a-z+-]*"
   ```
-- Production DB migrations go through the Management API (`POST /v1/projects/eujgglfcpdfgskyqfggg/database/query`), idempotent statements only, browser `User-Agent` + `Accept: application/json` headers (HANDOFF §11). The personal access token is entered only into a secure credential prompt — never into the repo, chat, or shell history.
+- Production DB migrations: Andy runs the SQL directly in the **Supabase dashboard SQL editor** (no token needed). Idempotent statements only. The Management API (`POST /v1/projects/eujgglfcpdfgskyqfggg/database/query`, browser `User-Agent` + `Accept: application/json`, HANDOFF §11) is the *fallback* for unattended runs — it only ever existed because Hyperagent had no other path. If used, the personal access token goes only into a secure credential prompt — never into the repo, chat, or shell history.
 - Never point a click-through test at production data (HANDOFF §9 "Testing against production — don't").
 
 ---
@@ -162,7 +162,7 @@ toDataURL() { return 'data:image/jpeg;base64,U1RVQg=='; },
 
 ### Task 1.1: Storage bucket + policies (production migration)
 
-**Step 1: Apply idempotent SQL via the Management API** (the `unit-photos` bucket already exists per HANDOFF §7 — this makes it public-read/auth-write and is safe to re-run):
+**Step 1: Andy runs this idempotent SQL in the Supabase dashboard SQL editor** (Management API is the fallback; see standing constraints). The `unit-photos` bucket already exists per HANDOFF §7 — this makes it public-read/auth-write and is safe to re-run:
 
 ```sql
 insert into storage.buckets (id, name, public) values ('unit-photos','unit-photos', true)
@@ -241,12 +241,22 @@ Expected: FAIL — `no base64 in upsert payload` (payload still contains `data:i
 function isDataURI(p){return typeof p==='string'&&p.slice(0,5)==='data:';}
 function dataURItoBlob(d){const i=d.indexOf(',');const mime=(d.slice(0,i).match(/data:(.*?)(;|$)/)||[])[1]||'image/jpeg';const bin=atob(d.slice(i+1));const arr=new Uint8Array(bin.length);for(let k=0;k<bin.length;k++)arr[k]=bin.charCodeAt(k);return new Blob([arr],{type:mime});}
 const PHOTO_FLUSH_CAP=6,PHOTO_UPLOAD_MS=8000;
-const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),ms))]);
+/* Timeout ABORTS the request (AbortController), not just abandons it — otherwise
+   hanging uploads accumulate across flush passes and the cap only bounds launches,
+   not concurrent in-flight requests. Known, accepted edge (same bucket as orphan
+   debt, NOT a bug to rediscover): an upload that times out client-side but lands
+   server-side anyway orphans a Storage object, and the retry uploads a duplicate
+   under a fresh uid path. Rows only ever reference the copy that acked in time. */
 async function syncPendingPhotos(){const jobs=[];S.units.forEach(o=>{(o.photos||[]).forEach((p,i)=>{if(isDataURI(p))jobs.push({o,i,path:'units/'+o.id+'/'+uid()+'.jpg'});});});S.issues.forEach(o=>{(o.photos||[]).forEach((p,i)=>{if(isDataURI(p))jobs.push({o,i,path:'issues/'+o.id+'/'+uid()+'.jpg'});});});
-  for(const j of jobs.slice(0,PHOTO_FLUSH_CAP)){try{const {error}=await withTimeout(sb.storage.from('unit-photos').upload(j.path,dataURItoBlob(j.o.photos[j.i]),{contentType:'image/jpeg'}),PHOTO_UPLOAD_MS);if(error)continue;const {data}=sb.storage.from('unit-photos').getPublicUrl(j.path);if(data&&data.publicUrl)j.o.photos[j.i]=data.publicUrl;}catch(e){}}}
+  for(const j of jobs.slice(0,PHOTO_FLUSH_CAP)){const ctl=(typeof AbortController!=='undefined')?new AbortController():null;let tm=null;
+    try{const up=sb.storage.from('unit-photos').upload(j.path,dataURItoBlob(j.o.photos[j.i]),{contentType:'image/jpeg',signal:ctl?ctl.signal:undefined});
+      const {error}=await Promise.race([up,new Promise((_,rej)=>{tm=setTimeout(()=>{if(ctl)ctl.abort();rej(new Error('timeout'));},PHOTO_UPLOAD_MS);})]);
+      clearTimeout(tm);if(error)continue;
+      const {data}=sb.storage.from('unit-photos').getPublicUrl(j.path);if(data&&data.publicUrl)j.o.photos[j.i]=data.publicUrl;}
+    catch(e){clearTimeout(tm);}}}
 ```
 
-Hook: first line inside `flush()`'s `try` block: `await syncPendingPhotos();` (before the diff loop — the swap must happen before rows are serialized). Overflow beyond the cap stays as data URIs → the row stays dirty → the tail-drain `scheduleFlush()` (Task 3.3) picks them up next pass. (Harness note: the timeout race's reject timer is captured, never fires — safe.)
+Hook: first line inside `flush()`'s `try` block: `await syncPendingPhotos();` (before the diff loop — the swap must happen before rows are serialized). Overflow beyond the cap stays as data URIs → the row stays dirty → the tail-drain `scheduleFlush()` (Task 3.3) picks them up next pass. `signal` is honored by current supabase-js v2; on an older build it's ignored and the race still frees the flush lock. (Harness notes: no `AbortController` in the vm sandbox → `ctl` is null there, guarded; the reject timer is captured, never fires — safe.)
 
 **Step 4: Run to verify it passes:** same command → `RESULT: PASS`, all 96 existing assertions still green.
 
@@ -579,7 +589,7 @@ Wire-up: `save()` additionally calls `persistCache()`. `doSignOut()` calls `KV.d
 - Modify: `index.html` — `MAPS` (~line 297), `toRow` (line 305), `reportsFor`/`issuesFor` (346–347), `unitGps` (353), `eventsForShow` (560), `recentDests` (632), `paneMoves` movement sort
 - Modify: `tools/fv_inv_offline.js`
 
-**Step 1: Migration** (idempotent; `default now()` stamps arrival server-side, and only on insert):
+**Step 1: Migration** — Andy runs in the dashboard SQL editor (idempotent; `default now()` stamps arrival server-side, and only on insert):
 
 ```sql
 alter table reports   add column if not exists received_at timestamptz not null default now();
