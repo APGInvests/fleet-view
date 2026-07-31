@@ -536,6 +536,50 @@ module.exports = async (app, t) => {
   t.eq(u.engines.B.kvaEach, 625, 'nameplates kept');
   t.ok(app.S.reports.some((x) => x.engine === 'B'), 'and the tagged check is still in history');
 
+  /* ---------------------------------------------------------------- */
+  /* Binding-pass progress must be visible from the Fleet list. Inherited pre-split
+     hours are NOT a reading for Engine A — otherwise a tech who skips A because
+     "the app already has it" leaves A's countdown running on an unattributable
+     number, which is the freeze failure rebuilt inside the fix. */
+  t.group('bigiron: an engine without its OWN meter reading is flagged on the card');
+  app.setState({ shows: [{ id: 's1', name: 'Fest' }], currentShowId: 's1',
+    units: [twin()], reports: [] });
+  u = app.S.units[0];
+  t.eq(F.twinGaps(u).join(','), 'A,B', 'a freshly converted unit needs BOTH meters read');
+  t.ok(F.engNeedsReading(u, 'A'), 'the inherited pre-split seed does NOT count as A having been read');
+  let card = F.unitCard(u, 's1');
+  t.includes(card, 'TWINPAK', 'the card shows the unit is a TwinPak');
+  t.includes(card, 'Gen A needs a meter reading', 'and names Engine A as still needing one');
+  t.includes(card, 'Gen B needs a meter reading', 'and Engine B too');
+  /* pre-split untagged history still does not count */
+  app.setState({ shows: [{ id: 's1', name: 'Fest' }], currentShowId: 's1', units: [twin()],
+    reports: [{ id: 'r0', unitId: 'tw', engine: null, engineHours: 3300, timestamp: 2000 }] });
+  t.ok(F.engNeedsReading(app.S.units[0], 'A'), 'untagged history is history, not a reading');
+  /* one engine read, one not */
+  app.setState({ shows: [{ id: 's1', name: 'Fest' }], currentShowId: 's1', units: [twin()],
+    reports: [{ id: 'ra', unitId: 'tw', engine: 'A', engineHours: 3310, timestamp: 3000 }] });
+  u = app.S.units[0];
+  t.eq(F.twinGaps(u).join(','), 'B', 'once A is read on its own meter, only B remains');
+  card = F.unitCard(u, 's1');
+  t.excludes(card, 'Gen A needs', 'A is no longer flagged');
+  t.includes(card, 'Gen B needs a meter reading', 'B still is');
+  /* both read => binding pass complete, no flags */
+  app.setState({ shows: [{ id: 's1', name: 'Fest' }], currentShowId: 's1', units: [twin()],
+    reports: [{ id: 'ra', unitId: 'tw', engine: 'A', engineHours: 3310, timestamp: 3000 },
+      { id: 'rb', unitId: 'tw', engine: 'B', engineHours: 118, timestamp: 3000 }] });
+  u = app.S.units[0];
+  t.eq(F.twinGaps(u).length, 0, 'both engines read => binding pass complete for this unit');
+  card = F.unitCard(u, 's1');
+  t.excludes(card, 'needs a meter reading', 'and the card carries no gap flag');
+  t.includes(card, 'TWINPAK', 'but still identifies as a TwinPak');
+  /* label style flows into the chip, and single-engine units are untouched */
+  app.setState({ shows: [{ id: 's1', name: 'Fest' }], currentShowId: 's1',
+    units: [twin({ engines: { style: '12', A: { kvaEach: 625 }, B: { kvaEach: 625 } } })], reports: [] });
+  t.includes(F.unitCard(app.S.units[0], 's1'), 'TWINPAK · 1/2', 'the chip follows the housing label style');
+  app.setState({ shows: [{ id: 's1', name: 'Fest' }], currentShowId: 's1', units: [single()], reports: [] });
+  t.excludes(F.unitCard(app.S.units[0], 's1'), 'TWINPAK', 'a single-engine card is unchanged');
+  t.eq(F.twinGaps(app.S.units[0]).length, 0, 'and has no engine gaps by definition');
+
   t.group('bigiron: a tagged issue alone earns the gate');
   app.setState({ units: [twin()], reports: [], issues: [
     { id: 'i1', unitId: 'tw', engine: 'B', severity: 'down', title: 'No start', timestamp: 1, resolved: false }] });
