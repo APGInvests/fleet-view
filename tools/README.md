@@ -47,7 +47,8 @@ The suite encodes the product contracts, not just syntax:
 Files named `tools/fv_inv_*.js` are **standing invariants**: preflight auto-loads
 every one of them on every run, no opt-in. Use them for contracts that must hold
 forever (the offline write path lives in `fv_inv_offline.js`, the service worker
-in `fv_inv_sw.js`, photo storage in `fv_inv_photos.js`). They use the same
+in `fv_inv_sw.js`, photo storage in `fv_inv_photos.js`, the big iron / TwinPak
+model in `fv_inv_bigiron.js`). They use the same
 `(app, t) => {...}` export shape as extras, and may be `async`.
 
 `--extras` remains for one-off, per-deploy assertion files.
