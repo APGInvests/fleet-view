@@ -306,4 +306,105 @@ module.exports = async (app, t) => {
   t.eq(F.unitGps(app.S.units[0]), null, 'and no map pin');
   t.eq(app.S.units[0].locationId, 's1', 'placement untouched');
   t.eq(app.S.reports[app.S.reports.length - 1].gps, null, 'the check stores no GPS, by design');
+
+  /* ---------------------------------------------------------------- */
+  /* Rule 2, paired: the hours input is blank on EVERY unit, and the identity
+     header supplies the previous reading as reference. The pairing is the
+     invariant — blanking without the reference just loses information, and a
+     prefilled reading lets someone re-save a stale value, freezing the service
+     clock while the engine runs. Neither half ships alone. */
+  t.group('bigiron: identity header + blank hours on ALL units (rule 2)');
+  app.setState({ settings: tech(), units: [single({ currentHours: 900 })], reports: [
+    { id: 'r1', unitId: 'sg', engine: null, engineHours: 900, timestamp: Date.now() - 3600e3, techName: 'Dana P.' }] });
+  clear('v_hrs');
+  F.logVitals('sg');
+  let sh = app.document.getElementById('sheet').innerHTML;
+  t.includes(sh, 'LAST RECORDED', 'identity header is present on a single-engine unit too');
+  t.includes(sh, '900 h', 'header shows the last recorded reading as REFERENCE');
+  t.includes(sh, 'A246B12359', 'header names the serial actually being checked');
+  t.includes(sh, 'Dana P.', 'header says who took that reading');
+  t.includes(sh, 'value="" placeholder="read the meter"', 'hours input is BLANK on a single-engine unit');
+  t.excludes(sh, 'value="900"', 'the stored reading is never prefilled into the input');
+  app.setState({ settings: tech(), units: [single({ currentHours: null })], reports: [] });
+  F.logVitals('sg');
+  sh = app.document.getElementById('sheet').innerHTML;
+  t.includes(sh, 'No checks yet', 'header says No checks yet when nothing was ever recorded');
+  /* on a TwinPak the header must name the engine and show only ITS reference */
+  app.setState({ settings: tech(), units: [twin()], reports: [
+    { id: 'rb', unitId: 'tw', engine: 'B', engineHours: 118, timestamp: 3000 }] });
+  F.logVitals('tw', 'B');
+  sh = app.document.getElementById('sheet').innerHTML;
+  t.includes(sh, '118 h', "B's header shows B's own reading");
+  t.excludes(sh, '3,243', "B's header never shows the merged pre-split meter");
+  F.logVitals('tw', 'A');
+  sh = app.document.getElementById('sheet').innerHTML;
+  t.includes(sh, 'pre-split', "A's header labels its inherited reading pre-split");
+
+  /* ---------------------------------------------------------------- */
+  t.group('bigiron: one check button per engine, same tap count');
+  app.setState({ settings: tech(), units: [twin()], reports: [] });
+  F.openUnit('tw');
+  sh = app.document.getElementById('sheet').innerHTML;
+  t.eq((sh.match(/logVitals\('tw','A'\)/g) || []).length, 1, 'exactly one Check Gen A button');
+  t.eq((sh.match(/logVitals\('tw','B'\)/g) || []).length, 1, 'exactly one Check Gen B button');
+  t.excludes(sh, "logVitals('tw')", 'no chassis-level Log check button on a TwinPak');
+  t.includes(sh, 'Check Gen A', 'the button names the engine before you type anything');
+  t.includes(sh, 'NOT YET CHECKED', 'an unobserved engine says so on its own row');
+  t.includes(sh, "flagIssue('tw','A')", 'flagging an issue is per-engine too');
+  app.setState({ settings: tech(), units: [single()], reports: [] });
+  F.openUnit('sg');
+  sh = app.document.getElementById('sheet').innerHTML;
+  t.includes(sh, "logVitals('sg')", 'a single-engine unit keeps its one Log check button');
+  t.eq((sh.match(/logVitals\(/g) || []).length, 1, 'exactly one check button on a single-engine unit');
+
+  t.group('bigiron: the half-down split is visible without opening anything');
+  app.setState({ settings: tech(), units: [twin({ engines: engs('running', 'down') })], reports: [] });
+  F.openUnit('tw');
+  sh = app.document.getElementById('sheet').innerHTML;
+  t.includes(sh, 'GEN B DOWN', 'the chassis header names the down engine');
+  t.includes(sh, '&#9679; RUNNING', "Gen A's row still reads RUNNING");
+  t.includes(sh, '&#9679; DOWN', "Gen B's row reads DOWN, side by side with A");
+
+  /* ---------------------------------------------------------------- */
+  t.group('bigiron: vitals pane filters by engine');
+  app.setState({ settings: tech(), units: [twin()], reports: [
+    { id: 'ra', unitId: 'tw', engine: null, engineHours: 3300, timestamp: 2000, techName: 'Old Hand', voltageLL: 480 },
+    { id: 'rb', unitId: 'tw', engine: 'B', engineHours: 118, timestamp: 3000, techName: 'Dana P.', voltageLL: 478 }] });
+  F.openUnit('tw');
+  F.setVitalsEng('tw', 'B');
+  sh = app.document.getElementById('sheet').innerHTML;
+  t.includes(sh, 'Dana P.', "the B filter shows B's checks");
+  t.excludes(sh, 'Old Hand', 'the B filter hides pre-split history entirely');
+  F.setVitalsEng('tw', 'A');
+  sh = app.document.getElementById('sheet').innerHTML;
+  t.includes(sh, 'Old Hand', 'the A filter includes pre-split history');
+  t.includes(sh, 'margin-left:6px">pre-split<', 'and chips those rows pre-split so nobody misreads them');
+  t.excludes(sh, 'Dana P.', "the A filter hides B's checks");
+  F.setVitalsEng('tw', '');
+  sh = app.document.getElementById('sheet').innerHTML;
+  t.includes(sh, 'Old Hand', 'Both shows everything');
+  t.includes(sh, 'Dana P.', 'Both shows everything (B too)');
+
+  /* ---------------------------------------------------------------- */
+  t.group('bigiron: service pane is per-engine, no chassis path left');
+  app.setState({ units: [twin()], reports: [] });
+  u = app.S.units[0];
+  const pane = F.paneService(u, F.serviceState(u));
+  t.includes(pane, "editService('tw','A')", 'Gen A has its own edit-target action');
+  t.includes(pane, "markServiced('tw','B')", 'Gen B has its own mark-serviced action');
+  t.excludes(pane, "editService('tw','')", 'no chassis-level service action survives on a TwinPak');
+  t.includes(pane, 'Gen A', 'countdown cards are labelled per engine');
+  t.includes(pane, 'No checks yet', "an engine with no observed meter says so instead of showing a number");
+  app.setState({ units: [single()], reports: [] });
+  const p2 = F.paneService(app.S.units[0], F.serviceState(app.S.units[0]));
+  t.includes(p2, "editService('sg','')", 'a single-engine unit still gets the chassis path');
+  t.includes(p2, 'Service countdown', 'and keeps its single countdown card');
+
+  t.group('bigiron: issues pane chips the engine');
+  app.setState({ units: [twin()], issues: [
+    { id: 'i1', unitId: 'tw', engine: 'B', severity: 'down', title: 'No start', timestamp: 2, resolved: false },
+    { id: 'i2', unitId: 'tw', engine: null, severity: 'cosmetic', title: 'Dent', timestamp: 1, resolved: false }] });
+  const pi = F.paneIssues(app.S.units[0]);
+  t.includes(pi, '>Gen B<', 'an engine-tagged issue carries its engine chip');
+  t.includes(pi, 'Dent', 'an untagged legacy issue still renders, unchipped');
 };
