@@ -146,6 +146,9 @@ record's existing history, labeled pre-split.
   not merge them. Each is one record with Gen 1 / Gen 2 aboard the same serial.
 - Flag `X5M0038` for nameplate verification during the pass — likely a missing digit
   (fleet pattern is `X5M00xxx`).
+  > **Superseded 2026-07-30:** no fleet-wide serial pattern exists. Serial format is
+  > never validated — see HANDOFF §8 rule 4. Verify the serial against the plate and
+  > record exactly what it reads; never correct it in the field.
 - Policy for future cases only: if two records are ever found describing one machine
   with cleanly attributable histories, the second record's reports may be re-tagged
   onto the survivor as Engine B rather than discarded. Ambiguous merged history always
