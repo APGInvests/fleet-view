@@ -627,6 +627,14 @@ module.exports = async (app, t) => {
     if (i < 0) return '';
     return html.slice(html.lastIndexOf('<', i), html.indexOf('>', i) + 1);
   };
+  /* The serial placeholder shows TWO different shapes on purpose. One example
+     implies a form; two dissimilar ones signal that any format is accepted, while
+     still cueing that the field takes text rather than digits. Don't "tidy" it back
+     to a single example. */
+  const serPlaceholder = /placeholder="([^"]*)"/.exec(tagOf(sh, 'f_serial') || '');
+  t.ok(!!serPlaceholder, 'the serial field has a placeholder cue at all');
+  t.ok(serPlaceholder && /A246B12359/.test(serPlaceholder[1]), 'placeholder shows a plain alphanumeric shape');
+  t.ok(serPlaceholder && /1LS01712\/14/.test(serPlaceholder[1]), 'AND a slashed shape, so no single format is implied');
   [['f_serial', 'serial'], ['f_tag', 'scan code']].forEach(([id, label]) => {
     const tag = tagOf(sh, id);
     t.ok(tag.length > 0, 'found the ' + label + ' input');
