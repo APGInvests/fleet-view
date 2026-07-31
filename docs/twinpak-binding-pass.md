@@ -43,12 +43,13 @@ The app will *let* you save without the meters — only the two nameplate rating
 
 ## Which engine is "Engine 1"?
 
-**The housing label decides. Nearly all of these have A and B stencilled on the control panels — use that.** Expect **A / B**.
+**The housing label decides. Nearly all of these have A and B stencilled on the control panels — use that.**
 
-Two exceptions:
+**The physical label always wins.** Nothing overrides it — not the serial, not the order numbers were typed into the app, not what you'd expect.
 
-- **Units 1 and 2** have both engine serials in the app's serial field. There, **Engine 1 = the first number**, regardless of the panels.
-- **Genuinely unlabelled machine?** Then **hitch end = Engine 1**, rear = Engine 2. Use the hitch, not left/right or road-side — the hitch end is part of the trailer, so it gives the same answer no matter which way the thing got backed in. Write down that you used the hitch rule.
+- **Genuinely unlabelled machine?** Only then: **hitch end = Engine 1**, rear = Engine 2. Use the hitch, not left/right or road-side — the hitch end is part of the trailer, so it gives the same answer no matter which way the thing got backed in. Write down that you used the hitch rule.
+
+**Units 1 and 2 have two serials in one field.** They follow the same rule as everything else — the panels decide. Separately, **if the engine plates tell you which serial sits on which side, write that down.** It's useful to us. It is not how you decide which engine is Engine 1.
 
 **Do not halve the package rating.** A 1000 kVA TwinPak is not two 500s. Read each plate.
 
@@ -59,12 +60,13 @@ Two exceptions:
 
 **Search in app:** `1LS01712/14` — the serial reads exactly like that. **Leave it alone.**
 
-**Engine 1 = the `1LS01712` engine. Engine 2 = the `1LS01714` engine.**
-Serial order wins here, even if the panels say otherwise — note it if they disagree.
+This unit's serial field holds **two** engine serials: `1LS01712` and `1LS01714`. **That order tells you nothing about which engine is which** — the panels decide, same as every other unit.
+
+Existing hours in the app are merged history. They stay with Engine 1, labelled pre-split.
 
 ### Housing
 - [ ] Panels labelled? Circle:  **A / B**  ·  **1 / 2**  ·  **not labelled**
-- [ ] Panels disagree with serial order? Say how: ______________________
+- [ ] If the engine plates show which serial is on which side, note it (record only, doesn't decide anything): ______________________
 
 ### Nameplates — both required
 - [ ] Engine 1 nameplate kVA: **______________**
@@ -89,7 +91,6 @@ Serial order wins here, even if the panels say otherwise — note it if they dis
 ### Check it worked
 - [ ] Unit now shows **two rows** — Check Gen A and Check Gen B (or Gen 1 / Gen 2)
 - [ ] **Service** tab shows **two** countdown cards
-- [ ] Each row shows **the meter you just typed**
 - [ ] Card shows **no** "needs a meter reading" flag
 
 **Notes:** ______________________________________________________________
@@ -100,12 +101,13 @@ Serial order wins here, even if the panels say otherwise — note it if they dis
 
 **Search in app:** `C5E02984-85` — leave the serial alone.
 
-**Engine 1 = the `C5E02984` engine. Engine 2 = the `C5E02985` engine.**
-Serial order wins here too.
+This unit's serial field holds **two** engine serials: `C5E02984` and `C5E02985`. **That order tells you nothing about which engine is which** — the panels decide, same as every other unit.
+
+Existing hours in the app are merged history. They stay with Engine 1, labelled pre-split.
 
 ### Housing
 - [ ] Panels labelled? Circle:  **A / B**  ·  **1 / 2**  ·  **not labelled**
-- [ ] Panels disagree with serial order? Say how: ______________________
+- [ ] If the engine plates show which serial is on which side, note it (record only, doesn't decide anything): ______________________
 
 ### Nameplates — both required
 - [ ] Engine 1 nameplate kVA: **______________**
@@ -130,7 +132,6 @@ Serial order wins here too.
 ### Check it worked
 - [ ] Two rows — Check Gen A and Check Gen B (or Gen 1 / Gen 2)
 - [ ] **Service** tab shows **two** countdown cards
-- [ ] Each row shows the meter you just typed
 - [ ] Card shows **no** "needs a meter reading" flag
 
 **Notes:** ______________________________________________________________
@@ -261,25 +262,25 @@ Serial order wins here too.
 
 ---
 
-# 6 of 7 · `X5M0038`  ⚠️ NAMEPLATE CHECK
+# 6 of 7 · `X5M0038`  — serial verification
 
 **Search in app:** `X5M0038`
 
-## ⚠️ This serial looks wrong. Check the plate before anything else.
+## Verify the serial against the plate before anything else.
 
-The rest of the fleet reads **`X5M00xxx`** — five digits after `X5M`. This one has four. It's probably missing a digit.
+Don't compare it to any other unit. Don't work out what it "should" be. Read the plate and write down what's on it.
 
 ### Serial check — do this first
 - [ ] Find the **unit serial plate** (not the engine plates)
-- [ ] Write the serial **exactly** as the plate reads, character for character:
+- [ ] Write the serial **exactly** as the plate reads, character for character — every letter, digit, dash, slash and space:
 
   **______________________________________**
 
-- [ ] Does it match the app's `X5M0038`?   **YES**  ·  **NO**
-- [ ] **If NO: leave the app alone.** Do not retype the serial. The office corrects it. You've done your job by writing it down.
+- [ ] Does it match the app's `X5M0038` exactly?   **YES**  ·  **NO**
+- [ ] **If it differs in any way: leave the app alone.** Do not retype the serial. Write the plate version above; the office takes it from there. You've done your job by writing it down.
 - [ ] Plate missing, painted over, or unreadable? Tick and say so: ______________________
 
-**Then carry on below — a wrong serial does not stop you splitting the engines.**
+**Then carry on below — the serial question does not stop you splitting the engines.**
 
 **Engine 1:** the panel label decides (expect A / B). Unlabelled → **hitch end = Engine 1**.
 
@@ -386,10 +387,10 @@ The flag deliberately ignores the old inherited hours — so a unit where Engine
 # When you're done — report back
 
 - [ ] All seven show the **TWINPAK** chip with **no** "needs a meter reading" flag
-- [ ] **`X5M0038`** — what the plate actually reads: ______________________________
+- [ ] **`X5M0038`** — what the plate actually reads (exactly): ______________________________
 - [ ] Any meter left blank, and why: ______________________________________
 - [ ] Any machine where the panels weren't labelled (so you used the hitch rule): ______________________
-- [ ] Any machine where panels disagreed with the serial order: ______________________
+- [ ] On units 1 and 2, which serial sat on which side (if the plates showed it): ______________________
 - [ ] Anything that didn't look right: ______________________________________
 
 ## If the app refuses to save
