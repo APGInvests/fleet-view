@@ -471,11 +471,77 @@ module.exports = async (app, t) => {
   F.saveUnit('cv');
   t.eq(app.S.units[0].engines.B.serviceDueHours, 368, 'an existing per-engine target is preserved');
   t.eq(F.engKva(app.S.units[0], 'B'), 700, 'a corrected nameplate is written through');
+  /* ---------------------------------------------------------------- */
+  /* Toggling off STOPS USING the split; it does not forget it. An accidental
+     toggle must cost nothing, so it is free when nothing is tagged to an engine
+     and typed-gated only when real observations would be stranded. */
+  t.group('bigiron: toggle-off preserves the jsonb, and is free when nothing is tagged');
+  convFixture();
+  F.tpseg(btn('yes'));
+  F.lsseg(btn('AB'));
+  app.document.getElementById('f_kvaA').value = '625';
+  app.document.getElementById('f_kvaB').value = '700';
+  F.saveUnit('cv');
+  t.ok(F.isTwin(app.S.units[0]), 'converted with no intake readings logged');
+  t.eq(app.S.reports.length, 0, 'so nothing is tagged to an engine yet');
   F.tpseg(btn('no'));
   app.document.getElementById('f_serial').value = 'TGD62501';
   F.saveUnit('cv');
-  t.ok(!F.isTwin(app.S.units[0]), 'toggling back to one engine clears engines');
-  t.ok(app.S.reports.some((x) => x.engine === 'B'), 'but engine-tagged history survives a re-split');
+  u = app.S.units[0];
+  t.ok(!F.isTwin(u), 'toggling off stops using the split, no confirmation needed');
+  t.ok(F.engArchived(u), 'and the jsonb is PRESERVED, not cleared');
+  t.eq(u.engines.off, true, 'marked off rather than deleted');
+  t.eq(u.engines.A.kvaEach, 625, "A's nameplate survives the toggle-off");
+  t.eq(u.engines.B.kvaEach, 700, "B's nameplate survives the toggle-off");
+  t.eq(F.engMeta(u, 'B').kvaEach, 700, 'and is still readable, so the form can prefill it');
+  F.editUnit('cv');
+  sh = app.document.getElementById('sheet').innerHTML;
+  t.includes(sh, 'value="700"', 'reopening the form shows the preserved nameplate');
+  t.includes(sh, 'still saved', 'and tells you the values were kept');
+  app.document.getElementById('f_serial').value = 'TGD62501';
+  app.document.getElementById('f_kvaA').value = '625';
+  app.document.getElementById('f_kvaB').value = '700';
+  F.tpseg(btn('yes'));
+  F.saveUnit('cv');
+  t.ok(F.isTwin(app.S.units[0]), 'toggling back on restores the split');
+  t.ok(!app.S.units[0].engines.off, 'and clears the off flag');
+
+  t.group('bigiron: toggle-off IS gated once observations are tagged to an engine');
+  convFixture();
+  F.tpseg(btn('yes'));
+  F.lsseg(btn('AB'));
+  app.document.getElementById('f_kvaA').value = '625';
+  app.document.getElementById('f_kvaB').value = '625';
+  app.document.getElementById('f_hrsB').value = '118';
+  F.saveUnit('cv');
+  t.eq(F.engTagged(app.S.units[0]).total, 1, 'one observation is now tagged to an engine');
+  clear('tw_confirm');
+  F.tpseg(btn('no'));
+  app.document.getElementById('f_serial').value = 'TGD62501';
+  F.saveUnit('cv');
+  t.ok(F.isTwin(app.S.units[0]), 'the save does NOT quietly toggle off');
+  sh = app.document.getElementById('sheet').innerHTML;
+  t.includes(sh, 'Type TWINPAK to confirm', 'a typed gate appears instead');
+  t.includes(sh, '1 check tagged Gen B', 'naming exactly what would be stranded');
+  t.includes(sh, 'Nothing is deleted', 'and stating plainly that nothing is deleted');
+  t.includes(sh, 'Keep TwinPak on', 'with a way out that changes nothing');
+  app.document.getElementById('tw_confirm').value = 'TWIN';
+  F.doTwinOff('cv');
+  t.ok(F.isTwin(app.S.units[0]), 'a partial confirmation refuses');
+  app.document.getElementById('tw_confirm').value = 'twinpak';
+  F.doTwinOff('cv');
+  u = app.S.units[0];
+  t.ok(!F.isTwin(u), 'typing TWINPAK turns it off (case-insensitive, like the delete gate)');
+  t.ok(F.engArchived(u), 'still preserved after the gated toggle-off');
+  t.eq(u.engines.B.kvaEach, 625, 'nameplates kept');
+  t.ok(app.S.reports.some((x) => x.engine === 'B'), 'and the tagged check is still in history');
+
+  t.group('bigiron: a tagged issue alone earns the gate');
+  app.setState({ units: [twin()], reports: [], issues: [
+    { id: 'i1', unitId: 'tw', engine: 'B', severity: 'down', title: 'No start', timestamp: 1, resolved: false }] });
+  const tg = F.engTagged(app.S.units[0]);
+  t.eq(tg.total, 1, 'a tagged issue with no tagged checks still counts');
+  t.includes(tg.parts.join(' '), 'issue tagged Gen B', 'and is named in the warning');
 
   /* ---------------------------------------------------------------- */
   t.group('bigiron: same-kVA sort tiebreak is the job label, then serial');
