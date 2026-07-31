@@ -588,6 +588,55 @@ module.exports = async (app, t) => {
   t.includes(tg.parts.join(' '), 'issue tagged Gen B', 'and is named in the warning');
 
   /* ---------------------------------------------------------------- */
+  /* HANDOFF §8 rule 4. The fleet spans multiple manufacturers with different serial
+     schemes — different lengths, some with dashes, some with slashes — so there is
+     no fleet-wide format to validate against. Any length check, pattern match or
+     "did you mean" would reject real equipment and, worse, prime a tech to distrust
+     what they actually read off the plate. Normalisation is case + whitespace ONLY.
+     These assertions exist so a future filter, roster or CSV import cannot quietly
+     reintroduce validation. */
+  t.group('bigiron: serial format is NEVER validated (rule 4)');
+  [['1LS01712/14', '1LS01712/14'],
+   ['C5E02984-85', 'C5E02984-85'],
+   ['X5M0038', 'X5M0038'],
+   ['A246B12359', 'A246B12359'],
+   ['x5m00446', 'X5M00446'],
+   ['  1LS01712/14  ', '1LS01712/14'],
+   ['GEN-1', 'GEN-1'],
+   ['A/B-01 02', 'A/B-01 02'],
+   ['7', '7'],
+   ['XQ125-500KW-TRAILER-MOUNTED-0001', 'XQ125-500KW-TRAILER-MOUNTED-0001'],
+  ].forEach(([raw, want]) => {
+    app.setState({ settings: tech(), shows: [{ id: 's1', name: 'Fest' }], currentShowId: 's1', units: [], reports: [], movements: [] });
+    clear(...FORM);
+    F.editUnit(null);
+    app.document.getElementById('f_serial').value = raw;
+    F.saveUnit('');
+    const made = app.S.units[0];
+    t.ok(!!made, 'accepted without complaint: "' + raw + '"');
+    t.eq(made && made.serial, want, 'stored verbatim, case+whitespace normalised only: "' + raw + '"');
+  });
+  /* The identity fields themselves carry no keypad and no browser-side validation.
+     Scoped to those two inputs on purpose: inputmode="decimal" on the genuinely
+     numeric fields is correct and required by the same rule. */
+  app.setState({ settings: tech(), units: [single({ serial: 'X5M0038' })], reports: [] });
+  F.editUnit('sg');
+  sh = app.document.getElementById('sheet').innerHTML;
+  const tagOf = (html, id) => {
+    const i = html.indexOf('id="' + id + '"');
+    if (i < 0) return '';
+    return html.slice(html.lastIndexOf('<', i), html.indexOf('>', i) + 1);
+  };
+  [['f_serial', 'serial'], ['f_tag', 'scan code']].forEach(([id, label]) => {
+    const tag = tagOf(sh, id);
+    t.ok(tag.length > 0, 'found the ' + label + ' input');
+    t.excludes(tag, 'inputmode', 'no numeric keypad on the ' + label + ' input');
+    t.excludes(tag, 'pattern=', 'no pattern validation on the ' + label + ' input');
+    t.excludes(tag, 'maxlength', 'no length cap on the ' + label + ' input');
+    t.excludes(tag, 'type="number"', 'the ' + label + ' input is never a number field');
+  });
+
+  /* ---------------------------------------------------------------- */
   t.group('bigiron: same-kVA sort tiebreak is the job label, then serial');
   app.setState({ shows: [{ id: 's1', name: 'Fest' }], currentShowId: 's1', units: [
     { id: 'zz', serial: 'ZZZ001', klass: 'big', kw: 500, opStatus: 'running', locationType: 'show', locationId: 's1', jobMeta: { s1: { name: 'Zulu tent' } } },
