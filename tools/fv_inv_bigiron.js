@@ -407,4 +407,91 @@ module.exports = async (app, t) => {
   const pi = F.paneIssues(app.S.units[0]);
   t.includes(pi, '>Gen B<', 'an engine-tagged issue carries its engine chip');
   t.includes(pi, 'Dent', 'an untagged legacy issue still renders, unchipped');
+
+  /* ---------------------------------------------------------------- */
+  t.group('bigiron: conversion needs both nameplates, logs intake as checks');
+  const FORM = ['f_serial', 'f_tag', 'f_weight', 'f_make', 'f_model', 'f_kw', 'f_breaker',
+    'f_trailer', 'f_fuel', 'f_tank', 'f_hours', 'f_svc', 'f_area', 'f_notes',
+    'f_kvaA', 'f_kvaB', 'f_hrsA', 'f_hrsB'];
+  const convFixture = () => {
+    app.setState({ settings: tech(), shows: [{ id: 's1', name: 'Fest' }], currentShowId: 's1', reports: [],
+      units: [{ id: 'cv', serial: 'TGD62501', klass: 'big', kw: 1000, currentHours: 3243,
+        opStatus: 'running', locationType: 'show', locationId: 's1', jobMeta: {} }] });
+    clear(...FORM);
+    F.editUnit('cv');
+    app.document.getElementById('f_serial').value = 'TGD62501';
+    app.document.getElementById('f_kw').value = '1000';
+    app.document.getElementById('f_hours').value = '3243';
+  };
+  convFixture();
+  F.tpseg(btn('yes'));
+  F.lsseg(btn('12'));
+  F.saveUnit('cv');                       // nameplates deliberately blank
+  t.ok(!F.isTwin(app.S.units[0]), 'conversion REFUSES without both nameplate kVAs');
+  t.eq(app.S.reports.length, 0, 'and manufactures no intake readings on the way out');
+
+  app.document.getElementById('f_kvaA').value = '625';
+  app.document.getElementById('f_kvaB').value = '625';
+  app.document.getElementById('f_hrsB').value = '118';
+  F.saveUnit('cv');
+  u = app.S.units[0];
+  t.ok(F.isTwin(u), 'conversion lands once both nameplates are read');
+  t.eq(u.engines.style, '12', 'the housing label style is stored');
+  t.eq(F.engName(u, 'B'), 'Gen 2', 'and drives display, while the tag stays canonical B');
+  t.eq(F.engKva(u, 'A'), 625, "A's nameplate stored");
+  t.eq(F.engKva(u, 'B'), 625, "B's nameplate stored (not 500 = kw/2)");
+  const intake = app.S.reports.filter((x) => x.engine === 'B');
+  t.eq(intake.length, 1, "B's meter reading became a CHECK, not a column write");
+  t.eq(intake[0].engineHours, 118, 'with the observed value');
+  t.eq(intake[0].techName, 'Mike R.', 'stamped with the tech who read it');
+  t.includes(intake[0].notes, 'Intake', 'and labelled as an intake reading');
+  t.eq(app.S.reports.filter((x) => x.engine === 'A').length, 0, 'a blank intake field creates nothing');
+  t.eq(F.engHours(u, 'B'), 118, "B's hours now derive from its own intake check");
+  t.eq(F.engHours(u, 'A'), 3243, 'A keeps the pre-split seed');
+  t.ok(F.engPreSplit(u, 'A'), "and A's reading is labelled pre-split");
+  t.eq(u.currentHours, 3243, 'the flat seed is preserved, not cleared');
+  t.eq(F.computeStatus(u).color, 'green', 'a converted running TwinPak is still green');
+
+  t.group('bigiron: re-saving a converted unit does not duplicate intake readings');
+  clear('f_hrsA', 'f_hrsB');
+  app.document.getElementById('f_serial').value = 'TGD62501';
+  app.document.getElementById('f_kw').value = '1000';
+  app.document.getElementById('f_hours').value = '3243';
+  app.document.getElementById('f_kvaA').value = '625';
+  app.document.getElementById('f_kvaB').value = '625';
+  F.saveUnit('cv');
+  t.eq(app.S.reports.filter((x) => x.engine === 'B').length, 1, 'still exactly one B intake reading');
+  t.ok(F.isTwin(app.S.units[0]), 'and it is still a TwinPak');
+
+  t.group('bigiron: per-engine targets survive a re-save; un-splitting keeps history');
+  app.S.units[0].engines.B.serviceDueHours = 368;
+  app.document.getElementById('f_serial').value = 'TGD62501';
+  app.document.getElementById('f_kvaA').value = '625';
+  app.document.getElementById('f_kvaB').value = '700';
+  F.saveUnit('cv');
+  t.eq(app.S.units[0].engines.B.serviceDueHours, 368, 'an existing per-engine target is preserved');
+  t.eq(F.engKva(app.S.units[0], 'B'), 700, 'a corrected nameplate is written through');
+  F.tpseg(btn('no'));
+  app.document.getElementById('f_serial').value = 'TGD62501';
+  F.saveUnit('cv');
+  t.ok(!F.isTwin(app.S.units[0]), 'toggling back to one engine clears engines');
+  t.ok(app.S.reports.some((x) => x.engine === 'B'), 'but engine-tagged history survives a re-split');
+
+  /* ---------------------------------------------------------------- */
+  t.group('bigiron: same-kVA sort tiebreak is the job label, then serial');
+  app.setState({ shows: [{ id: 's1', name: 'Fest' }], currentShowId: 's1', units: [
+    { id: 'zz', serial: 'ZZZ001', klass: 'big', kw: 500, opStatus: 'running', locationType: 'show', locationId: 's1', jobMeta: { s1: { name: 'Zulu tent' } } },
+    { id: 'mm', serial: 'MMM001', klass: 'big', kw: 500, opStatus: 'running', locationType: 'show', locationId: 's1', jobMeta: {} },
+    { id: 'aa', serial: 'QQQ001', klass: 'big', kw: 500, opStatus: 'running', locationType: 'show', locationId: 's1', jobMeta: { s1: { name: 'Alpha stage' } } },
+  ] });
+  t.eq(app.S.units.slice().sort(F.byKva).map((x) => x.id).join(','), 'aa,mm,zz',
+    'labelled units sort by label, unlabelled by serial: Alpha stage, MMM001, Zulu tent');
+  /* the two rules that outrank the tiebreak must still hold */
+  app.setState({ shows: [{ id: 's1', name: 'Fest' }], currentShowId: 's1', units: [
+    { id: 'big', serial: 'B', klass: 'big', kw: 900, opStatus: 'running', locationType: 'show', locationId: 's1', jobMeta: {} },
+    { id: 'dn', serial: 'A', klass: 'big', kw: 100, opStatus: 'down', locationType: 'show', locationId: 's1', jobMeta: { s1: { name: 'Aaa' } } },
+    { id: 'sm', serial: 'C', klass: 'big', kw: 200, opStatus: 'running', locationType: 'show', locationId: 's1', jobMeta: {} },
+  ] });
+  t.eq(app.S.units.slice().sort(F.byKva).map((x) => x.id).join(','), 'sm,big,dn',
+    'kVA ascending still wins, and a down unit still sinks below everything');
 };
