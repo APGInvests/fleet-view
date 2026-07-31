@@ -107,7 +107,8 @@ Lives as top-level columns on `units`. Follows the machine from show to show for
 | `make`, `model` | |
 | `kw` | Rating in **kVA** (field name is legacy) |
 | `breakerSize`, `fuelType`, `tankGallons`, `weightLbs` | |
-| `currentHours`, `serviceDueHours` | service tracking |
+| `currentHours`, `serviceDueHours` | service tracking. **On a TwinPak these are demoted** — see below. |
+| `engines` | **jsonb. Present ⇔ true TwinPak.** Two engines in one housing = one NES line item = one record, one serial. |
 | `opStatus` | `'staged'` \| `'running'` \| `'down'`. **New units default to `staged`.** |
 | `photos` | array of base64 data URIs (see §7) |
 | `notes` | |
@@ -135,6 +136,31 @@ Lives as top-level columns on `units`. Follows the machine from show to show for
 
 `reports` (vital-sign checks), `issues`, and `movements` are **append-only** — new rows, never edits. Each is stamped with `techName` and a timestamp. This is what makes shift handoff work and what will make offline sync tractable.
 
+### Layer 1b — two engines in one record (true TwinPak)
+
+The company's **National Equipment Schedule** decides what counts as one piece of equipment, and this app matches it. Two machines permanently paired in one housing are ONE line item: one record, one shared serial, two engines. Generators that can be unbolted and swapped off a shared chassis each keep their own record — that already worked and was not touched.
+
+`units.engines` shape:
+
+```json
+{ "style": "AB",
+  "A": { "kvaEach": 625, "serviceDueHours": 3493, "lastServiceHours": 3243, "opStatus": "running" },
+  "B": { "kvaEach": 625 } }
+```
+
+- **Presence of `engines` is the only authority.** `config` is free-text metadata and is *not* evidence (see §7).
+- `style` is `"AB"` or `"12"`, whichever the housing is physically labelled. **Stored tags on `reports.engine` / `issues.engine` are always canonical `'A'`/`'B'`**, so relabelling the housing never breaks history.
+- **Hours are derived, never stored.** `engHours(u,'A')` takes the newest `engineHours` from checks tagged `'A'` *or* untagged — untagged history is pre-split and inherits to A, labelled "pre-split" in the UI. `engHours(u,'B')` takes tagged-`'B'` checks **only, with no fallback**, so a fresh Engine B reads "No checks yet" instead of inheriting the old merged meter. A merged "246h to service" is unanswerable — on which engine? — and removing it is the point of this model.
+- **Corrections are new checks**, never field edits. There is deliberately no editable hours field on a TwinPak.
+- **Status is per-engine too**, stored in `engines[e].opStatus`, with the chassis derived. It aggregates on the **failure axis only**: any engine down ⇒ the trailer is red, any engine running ⇒ the trailer is running (one engine on standby is normal, not idle), staged only when nothing runs. **An unobserved engine never downgrades the chassis** — without that clause every conversion would flip a working machine grey the moment it was converted. When the engines disagree the label names the engine (`GEN B DOWN`), because a red chip must not read as "the whole trailer is dead".
+- **Service and staleness follow the worst engine.** `serviceState()` returns the worst engine's state, so status colours, the alert section, card chips and the service filter chip all inherited the rule through their existing call sites. A down engine is exempt from stale; a running engine still owes a check.
+- **Targets and nameplates ARE stored**, because neither is an observation: `serviceDueHours`, `lastServiceHours` and `kvaEach` live per engine.
+- **`kvaEach` is read off each engine's nameplate and is the one required field in the app** — a deliberate, owner-approved exception to "every field optional", because conversion is a low-frequency setup flow done while standing at the machine. Per-engine load % divides by `kvaEach`, never by `kw/2`: paralleling gear and a shared bus derate the package, so half the package rating appears on no nameplate. A number nobody observed is the same failure as the merged hours.
+- Flat `currentHours` on a TwinPak is **only Engine A's pre-split seed**; flat `serviceDueHours` is ignored once `engines` exists. Single-engine units are untouched — zero churn on the ~34 records that already worked.
+- **Movements and map pins stay chassis-level.** You move a trailer, not an engine. There is no engine dimension on movements.
+
+Invariants live in `tools/fv_inv_bigiron.js` and run on every preflight.
+
 ### Location has exactly one authoritative writer
 
 `unitGps(u)` derives a unit's map pin **only from `movements`**. Reports and issues store `gps: null` by design.
@@ -147,6 +173,8 @@ Lives as top-level columns on `units`. Follows the machine from show to show for
 
 **Bottom nav:** Jobs · Fleet · Map · Alerts, plus a floating **+ Add** button.
 
+On a **TwinPak** the single "Log check / Flag issue" pair on unit detail becomes **one row per engine** — each showing that engine's status dot, status word, hours and freshness, with its own Check and Flag buttons. Same tap count as a single unit, and the half-down split is visible without opening anything. The **True TwinPak toggle** lives in the big-iron section of the add/edit form: label style, both nameplate kVAs, and per-engine intake meter readings (which are logged as engine-tagged intake *checks*, not column writes).
+
 **Gesture contract — identical on every list:**
 | Gesture | Meaning |
 |---|---|
@@ -158,17 +186,19 @@ Lives as top-level columns on `units`. Follows the machine from show to show for
 List with search (name/location), per-person favorites (star pins to top), and health chips (unit count, down, overdue, last activity). Swipe left = **Delete job** — *refused while the job still has units on it*. Swipe right = that job's map.
 
 ### Job detail
-Header buttons: Map · Log · Report. Search + filter chips (All / Big iron / Small iron / Down / Low fuel / Service). Unit cards sorted by **kVA ascending, with hard-down units forced to the bottom** (crews doing rounds need runnable units on top; a known-broken unit is noise). Card swipe left = **Off job**; swipe right = its map pin.
+Header buttons: Map · Log · Report. Search + filter chips (All / Big iron / Small iron / Down / Low fuel / Service). Unit cards sorted by **kVA ascending, with hard-down units forced to the bottom**, tiebreaking on the **job label when set, else serial** (same-kVA units are indistinguishable by serial alone) (crews doing rounds need runnable units on top; a known-broken unit is noise). Card swipe left = **Off job**; swipe right = its map pin.
 
 ### Unit detail — five tabs
-- **Vitals** — Latest check card (hero) → **Recent checks** comparison table → **Check log**. The comparison table is rows = V L-L, Amps L1/L2/L3, Coolant °, Oil psi, Load %; columns = last 4 checks, newest first; neutral **▲/▼** vs the previous check. Neutral on purpose: for these measures "up" is not universally good or bad.
-- **Issues** — severity `cosmetic` / `maintenance` / `down`, with photos, resolvable.
-- **Service** — hours remaining vs `serviceDueHours`, mark-serviced.
+- **Vitals** — Latest check card (hero) → **Recent checks** comparison table → **Check log**. On a TwinPak, engine filter chips (Both / Gen A / Gen B) scope all three; untagged rows are chipped **pre-split**. The comparison table is rows = V L-L, Amps L1/L2/L3, Coolant °, Oil psi, Load %; columns = last 4 checks, newest first; neutral **▲/▼** vs the previous check. Neutral on purpose: for these measures "up" is not universally good or bad.
+- **Issues** — severity `cosmetic` / `maintenance` / `down`, with photos, resolvable. Engine-tagged issues carry an engine chip.
+- **Service** — hours remaining vs `serviceDueHours`, mark-serviced. On a TwinPak, **one countdown card per engine** with its own target and mark-serviced action.
 - **Info** — specs, Serial then Scan code, photos, Edit.
 - **Placement** — per-job name/placement/note, capture placement (GPS), adjust pin on map, move / mark en route.
 
 ### Log check form
 Volt L-L / L-N, Amps L1/L2/L3, Hz, Load kW, Coolant temp, Oil psi, Fuel %, Batt V, DEF %, Engine hrs, Condition notes, Status.
+- **A pinned identity header** tops the form on every unit: serial, engine label on a TwinPak, chassis config, and the **last recorded hours** (or "No checks yet") with who read it and when. Identity used to appear on the selection screen and vanish — on a TwinPak that made it a coin flip which engine's hours you were recording.
+- **Engine hrs is blank on every unit.** It used to render the stored reading, which meant anyone skipping the field silently re-saved the old value: the service clock froze while the engine ran, which is how a unit reaches hundreds of hours past service with nobody noticing. The header supplies the previous reading as *reference* instead — reference visible, value observed. The two ship together; blanking without the reference just loses information.
 - **Load % is derived, not entered:** `round(loadKw / (kVA × 0.8) × 100)`, shown live under Load kW with the formula visible. 0.8 is assumed power factor, so the divisor is *rated kW*.
 - The status selector **pre-selects the unit's current status** — it does not default to "Running" (see §8, rule 3).
 - Every field is optional.
@@ -229,6 +259,8 @@ The owner repeatedly declined features to keep the app usable. Every item below 
 **Chart.js is loaded but unused.** The vitals view originally used stacked multi-axis charts; they were unreadable (metrics with wildly different ranges cannot share a chart honestly) and were replaced by the Recent-checks table. `drawTrend()` still exists but is never called. Safe to delete along with the CDN tag.
 
 **Photos — resolved 2026-07-30 (build `photos-sw`).** Capture still stores data URIs (works offline); `flush()` uploads them to the `unit-photos` Storage bucket and swaps in public URLs before rows serialize — bounded (6/flush, 8s abort via AbortController) so a stalled LTE upload can't hold the flush lock. Storage outage: URI stays, save proceeds, retried next flush. Accepted debt: removed photos orphan their Storage objects, and a timed-out-but-landed upload orphans + duplicates on retry. **One-time migration of legacy base64 rows (~8 units): `tools/fv_migrate_photos.js` — pending owner run** (`--dry-run` first; ordering matters: only run *after* the `photos-sw` build is live, since the old app could re-flush base64 over migrated rows).
+
+**The `Config` dropdown is not evidence of a true TwinPak.** The big-iron edit form has a free-text-ish `Config` select whose options include the literal string `TwinPak`. That value predates the two-engine model and "musical generators" on a shared chassis can carry it too, so `config === 'TwinPak'` says nothing about whether a record has two engines. **Only the presence of `units.engines` is authoritative.** The trap: any future report, filter or roster keyed on `config` will silently mis-classify records. The toggle deliberately does not derive from it.
 
 **`closeSheet()` unconditionally calls `render()`.** Closing even a read-only sheet rebuilds the whole view and re-initialises Leaflet on the map tab. Will flash/scroll-jump as data grows. Fix: a `dirty` flag on `sheet()`.
 
@@ -313,7 +345,7 @@ Ordered roughly by value. All are unbuilt and all were deliberately deferred —
 **Tail of phase 1**
 1. **Offline-tolerant field mode.** Show sites have dead zones, which is exactly when the app matters. Step (a) — the service worker app shell — **shipped 2026-07-30**. Remaining: (b) cache last-loaded data, (c) durable write queue replayed on reconnect. Full design, invariants, and sequencing live in `docs/plans/2026-07-29-offline-write-path.md` (durable-diff architecture — the S-vs-SNAP diff *is* the queue; no separate outbox). Parked until a show with known bad signal forces it.
 
-1b. **Big iron / TwinPak model** — in flight via the Hyperagent build spec at `docs/big-iron-hyperagent-spec.md` (one NES line item = one record; true TwinPak = one record, two engines, event-sourced hours, per-engine service targets). The spec is the authority; read it before touching big-iron code.
+1b. ~~**Big iron / TwinPak model**~~ — **shipped 2026-07-30** in three verified pushes (`twinpak-core` → `twinpak-ui` → `twinpak-convert`). One NES line item = one record; a true TwinPak is one record with two engines, event-sourced hours, per-engine status/service targets/nameplates. **§4 (Layer 1b) and §5 are now the operational authority**; `docs/big-iron-hyperagent-spec.md` remains the design record and rationale, not the current spec. Remaining: the tech **binding pass** — seven existing records get the toggle while someone stands at each machine (`1LS01712/14`, `C5E02984-85`, `TGD62501`, `TGD62504`, `X5M00306`, `X5M0038`, `X5M00446`). `TGD62501` and `TGD62504` are two *separate* TwinPaks — do not merge. Verify `X5M0038`'s nameplate, likely a missing digit (fleet pattern is `X5M00xxx`).
 2. **"What's on my show" report / manifest.** One tap on a job → shareable roster (serial, kVA, placement, status, hours, open issues) + totals, with copy/email/CSV. This is the owner's stated payoff: proof of what was sent to a show without driving around collecting serials. Doubles as the end-of-show punch list for the service department.
 3. **Job overview strip** — live tiles (on-site / running / down / overdue / total kVA / avg load) + a needs-attention shortlist, for monitoring from an office.
 
