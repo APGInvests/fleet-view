@@ -409,138 +409,133 @@ module.exports = async (app, t) => {
   t.includes(pi, 'Dent', 'an untagged legacy issue still renders, unchipped');
 
   /* ---------------------------------------------------------------- */
-  t.group('bigiron: conversion needs both nameplates, logs intake as checks');
+  /* ---------------------------------------------------------------- */
+  /* A TRUE TWINPAK IS NEVER UN-TWINNED. Two engines in one container, wired
+     together permanently. There is no un-toggle, no gate, no archived state: the
+     form cannot create a twin and cannot dissolve one. The roster import is the
+     only writer of twin status, so a tech can never classify anything, and can
+     therefore never classify it wrong. What a tech does on a twin, total: pick the
+     housing label style, and type two meter readings.
+
+     Nameplate kVA stays EDITABLE, deliberately. The roster figure is a derived
+     kW/0.8 conversion and it is approximate: TGD62501 reads 1257 in the app where
+     the conversion says 1250, because someone read the real plates. Classification
+     is a roster fact; a nameplate rating is an observation, and a tech at the
+     machine beats a spreadsheet. */
+  t.group('bigiron: the form has NO un-twin control at all');
   const FORM = ['f_serial', 'f_tag', 'f_weight', 'f_make', 'f_model', 'f_kw', 'f_breaker',
     'f_trailer', 'f_fuel', 'f_tank', 'f_hours', 'f_svc', 'f_area', 'f_notes',
     'f_kvaA', 'f_kvaB', 'f_hrsA', 'f_hrsB'];
-  const convFixture = () => {
-    app.setState({ settings: tech(), shows: [{ id: 's1', name: 'Fest' }], currentShowId: 's1', reports: [],
-      units: [{ id: 'cv', serial: 'TGD62501', klass: 'big', kw: 1000, currentHours: 3243,
-        opStatus: 'running', locationType: 'show', locationId: 's1', jobMeta: {} }] });
+  const openForm = (unit) => {
+    app.setState({ settings: tech(), shows: [{ id: 's1', name: 'Fest' }], currentShowId: 's1',
+      units: [unit], reports: [] });
     clear(...FORM);
-    F.editUnit('cv');
-    app.document.getElementById('f_serial').value = 'TGD62501';
-    app.document.getElementById('f_kw').value = '1000';
-    app.document.getElementById('f_hours').value = '3243';
+    F.editUnit(unit.id);
+    return app.document.getElementById('sheet').innerHTML;
   };
-  convFixture();
-  F.tpseg(btn('yes'));
+  let sh2 = openForm(twin());
+  t.excludes(sh2, 'tp_seg', 'no TwinPak toggle segment exists');
+  t.excludes(sh2, 'One engine', 'no "One engine" option to un-twin with');
+  t.excludes(sh2, 'tpseg', 'no toggle handler wired to anything');
+  t.excludes(sh2, 'Type TWINPAK', 'no typed un-twin gate');
+  t.ok(typeof F.confirmTwinOff === 'undefined', 'confirmTwinOff no longer exists');
+  t.ok(typeof F.doTwinOff === 'undefined', 'doTwinOff no longer exists');
+  t.ok(typeof F.engArchived === 'undefined', 'engArchived no longer exists');
+  t.ok(typeof F.tpseg === 'undefined', 'tpseg no longer exists');
+  t.includes(sh2, 'ls_seg', 'the housing label picker is still there');
+  t.includes(sh2, 'f_kvaA', 'and the nameplate fields are still editable');
+  t.includes(sh2, 'f_hrsA', 'and the hours fields are still there');
+
+  t.group('bigiron: a twin stays a twin through a save');
+  const saveForm = (vals) => {
+    Object.keys(vals).forEach((k) => { app.document.getElementById(k).value = vals[k]; });
+    F.saveUnit('tw');
+    return app.S.units[0];
+  };
+  openForm(twin());
+  u = saveForm({ f_serial: '1LS01712/14', f_kw: '1000', f_hours: '3243', f_kvaA: '625', f_kvaB: '625' });
+  t.ok(F.isTwin(u), 'still a twin after an ordinary save');
+  t.eq(u.engines.A.kvaEach, 625, 'engines intact');
+  t.eq(u.engines.B.serviceDueHours == null, true, 'and nothing invented on B');
+  openForm(twin());
+  u = saveForm({ f_serial: '1LS01712/14', f_kw: '1000', f_hours: '3243', f_kvaA: '625', f_kvaB: '625',
+    f_make: 'Cat', f_model: 'XQ2000', f_notes: 'edited' });
+  t.ok(F.isTwin(u), 'still a twin after editing unrelated fields');
+  t.eq(u.make, 'Cat', 'and the unrelated edit landed');
+
+  t.group('bigiron: the form cannot CREATE a twin');
+  app.setState({ settings: tech(), shows: [{ id: 's1', name: 'Fest' }], currentShowId: 's1',
+    units: [single()], reports: [] });
+  clear(...FORM);
+  F.editUnit('sg');
+  app.document.getElementById('f_serial').value = 'A246B12359';
+  app.document.getElementById('f_kw').value = '500';
+  app.document.getElementById('f_kvaA').value = '625';   // even with values typed in
+  app.document.getElementById('f_kvaB').value = '625';
+  F.saveUnit('sg');
+  t.eq(F.isTwin(app.S.units[0]), false, 'a single-engine unit cannot become a twin from the form');
+  t.ok(app.S.units[0].engines == null, 'and no engines object is fabricated');
+
+  t.group('bigiron: nameplate kVA stays editable on a twin (roster figure is approximate)');
+  openForm(twin());
+  u = saveForm({ f_serial: '1LS01712/14', f_kw: '1000', f_hours: '3243', f_kvaA: '628', f_kvaB: '629' });
+  t.eq(F.engKva(u, 'A'), 628, 'a corrected plate reading writes through on A');
+  t.eq(F.engKva(u, 'B'), 629, 'and on B');
+  t.eq(u.engines.A.serviceDueHours, 3493, 'while the per-engine service target survives');
+  /* the one exception to every-field-optional */
+  openForm(twin());
+  app.document.getElementById('f_serial').value = '1LS01712/14';
+  app.document.getElementById('f_kvaA').value = '';
+  app.document.getElementById('f_kvaB').value = '625';
+  F.saveUnit('tw');
+  t.eq(F.engKva(app.S.units[0], 'A'), 625, 'blanking a nameplate is refused, old value stands');
+
+  t.group('bigiron: meter readings on the form become engine-tagged checks');
+  openForm(twin());
+  u = saveForm({ f_serial: '1LS01712/14', f_kw: '1000', f_hours: '3243', f_kvaA: '625', f_kvaB: '625',
+    f_hrsB: '118' });
+  const mr = app.S.reports.filter((x) => x.engine === 'B');
+  t.eq(mr.length, 1, "B's reading became a check, not a column write");
+  t.eq(mr[0].engineHours, 118, 'with the observed value');
+  t.eq(mr[0].techName, 'Mike R.', 'stamped with the tech');
+  t.eq(app.S.reports.filter((x) => x.engine === 'A').length, 0, 'a blank field creates nothing');
+  t.eq(F.engHours(u, 'B'), 118, "and B's hours now derive from it");
+  t.eq(u.currentHours, 3243, 'the flat pre-split seed is untouched');
+  /* re-saving with the hours fields blank must not duplicate anything */
+  app.document.getElementById('f_hrsB').value = '';
+  app.document.getElementById('f_serial').value = '1LS01712/14';
+  F.saveUnit('tw');
+  t.eq(app.S.reports.filter((x) => x.engine === 'B').length, 1, 'still exactly one B reading after a re-save');
+
+  t.group('bigiron: an unread housing label stays UNSET and reads neutrally');
+  const noStyle = twin({ engines: { A: { kvaEach: 500 }, B: { kvaEach: 500 } } });
+  app.setState({ settings: tech(), units: [noStyle], reports: [] });
+  u = app.S.units[0];
+  t.eq(F.engStyle(u), null, 'no style value means unset, not a silent A/B default');
+  t.eq(F.engName(u, 'A'), 'Engine 1', 'labels read Engine 1');
+  t.eq(F.engName(u, 'B'), 'Engine 2', 'and Engine 2, claiming no stencil');
+  t.includes(F.unitCard(u, null), 'TWINPAK', 'the card still identifies it as a TwinPak');
+  t.excludes(F.unitCard(u, null), 'TWINPAK · ', 'but claims no A/B or 1/2 label style');
+  sh2 = openForm(noStyle);
+  t.excludes(sh2, 'data-v="AB" class="on"', 'the A/B option is NOT pre-selected');
+  t.excludes(sh2, 'data-v="12" class="on"', 'nor the 1/2 option');
+  t.includes(sh2, 'Not set.', 'and the picker says so');
+  /* unset is honest, not required: a save with no style picked must succeed */
+  u = saveForm({ f_serial: '1LS01712/14', f_kw: '1000', f_kvaA: '500', f_kvaB: '500' });
+  t.ok(F.isTwin(u), 'saving without picking a style still works');
+  t.eq(F.engStyle(u), null, 'and the style stays unset rather than defaulting');
+  t.eq(F.engName(u, 'B'), 'Engine 2', 'labels stay neutral');
+  /* picking one writes it */
+  openForm(noStyle);
   F.lsseg(btn('12'));
-  F.saveUnit('cv');                       // nameplates deliberately blank
-  t.ok(!F.isTwin(app.S.units[0]), 'conversion REFUSES without both nameplate kVAs');
-  t.eq(app.S.reports.length, 0, 'and manufactures no intake readings on the way out');
-
-  app.document.getElementById('f_kvaA').value = '625';
-  app.document.getElementById('f_kvaB').value = '625';
-  app.document.getElementById('f_hrsB').value = '118';
-  F.saveUnit('cv');
-  u = app.S.units[0];
-  t.ok(F.isTwin(u), 'conversion lands once both nameplates are read');
-  t.eq(u.engines.style, '12', 'the housing label style is stored');
-  t.eq(F.engName(u, 'B'), 'Gen 2', 'and drives display, while the tag stays canonical B');
-  t.eq(F.engKva(u, 'A'), 625, "A's nameplate stored");
-  t.eq(F.engKva(u, 'B'), 625, "B's nameplate stored (not 500 = kw/2)");
-  const intake = app.S.reports.filter((x) => x.engine === 'B');
-  t.eq(intake.length, 1, "B's meter reading became a CHECK, not a column write");
-  t.eq(intake[0].engineHours, 118, 'with the observed value');
-  t.eq(intake[0].techName, 'Mike R.', 'stamped with the tech who read it');
-  t.includes(intake[0].notes, 'Intake', 'and labelled as an intake reading');
-  t.eq(app.S.reports.filter((x) => x.engine === 'A').length, 0, 'a blank intake field creates nothing');
-  t.eq(F.engHours(u, 'B'), 118, "B's hours now derive from its own intake check");
-  t.eq(F.engHours(u, 'A'), 3243, 'A keeps the pre-split seed');
-  t.ok(F.engPreSplit(u, 'A'), "and A's reading is labelled pre-split");
-  t.eq(u.currentHours, 3243, 'the flat seed is preserved, not cleared');
-  t.eq(F.computeStatus(u).color, 'green', 'a converted running TwinPak is still green');
-
-  t.group('bigiron: re-saving a converted unit does not duplicate intake readings');
-  clear('f_hrsA', 'f_hrsB');
-  app.document.getElementById('f_serial').value = 'TGD62501';
-  app.document.getElementById('f_kw').value = '1000';
-  app.document.getElementById('f_hours').value = '3243';
-  app.document.getElementById('f_kvaA').value = '625';
-  app.document.getElementById('f_kvaB').value = '625';
-  F.saveUnit('cv');
-  t.eq(app.S.reports.filter((x) => x.engine === 'B').length, 1, 'still exactly one B intake reading');
-  t.ok(F.isTwin(app.S.units[0]), 'and it is still a TwinPak');
-
-  t.group('bigiron: per-engine targets survive a re-save; un-splitting keeps history');
-  app.S.units[0].engines.B.serviceDueHours = 368;
-  app.document.getElementById('f_serial').value = 'TGD62501';
-  app.document.getElementById('f_kvaA').value = '625';
-  app.document.getElementById('f_kvaB').value = '700';
-  F.saveUnit('cv');
-  t.eq(app.S.units[0].engines.B.serviceDueHours, 368, 'an existing per-engine target is preserved');
-  t.eq(F.engKva(app.S.units[0], 'B'), 700, 'a corrected nameplate is written through');
-  /* ---------------------------------------------------------------- */
-  /* Toggling off STOPS USING the split; it does not forget it. An accidental
-     toggle must cost nothing, so it is free when nothing is tagged to an engine
-     and typed-gated only when real observations would be stranded. */
-  t.group('bigiron: toggle-off preserves the jsonb, and is free when nothing is tagged');
-  convFixture();
-  F.tpseg(btn('yes'));
+  u = saveForm({ f_serial: '1LS01712/14', f_kw: '1000', f_kvaA: '500', f_kvaB: '500' });
+  t.eq(F.engStyle(u), '12', 'picking Gen 1 / Gen 2 writes the style');
+  t.eq(F.engName(u, 'B'), 'Gen 2', 'and the labels follow');
+  openForm(twin());
   F.lsseg(btn('AB'));
-  app.document.getElementById('f_kvaA').value = '625';
-  app.document.getElementById('f_kvaB').value = '700';
-  F.saveUnit('cv');
-  t.ok(F.isTwin(app.S.units[0]), 'converted with no intake readings logged');
-  t.eq(app.S.reports.length, 0, 'so nothing is tagged to an engine yet');
-  F.tpseg(btn('no'));
-  app.document.getElementById('f_serial').value = 'TGD62501';
-  F.saveUnit('cv');
-  u = app.S.units[0];
-  t.ok(!F.isTwin(u), 'toggling off stops using the split, no confirmation needed');
-  t.ok(F.engArchived(u), 'and the jsonb is PRESERVED, not cleared');
-  t.eq(u.engines.off, true, 'marked off rather than deleted');
-  t.eq(u.engines.A.kvaEach, 625, "A's nameplate survives the toggle-off");
-  t.eq(u.engines.B.kvaEach, 700, "B's nameplate survives the toggle-off");
-  t.eq(F.engMeta(u, 'B').kvaEach, 700, 'and is still readable, so the form can prefill it');
-  F.editUnit('cv');
-  sh = app.document.getElementById('sheet').innerHTML;
-  t.includes(sh, 'value="700"', 'reopening the form shows the preserved nameplate');
-  t.includes(sh, 'still saved', 'and tells you the values were kept');
-  app.document.getElementById('f_serial').value = 'TGD62501';
-  app.document.getElementById('f_kvaA').value = '625';
-  app.document.getElementById('f_kvaB').value = '700';
-  F.tpseg(btn('yes'));
-  F.saveUnit('cv');
-  t.ok(F.isTwin(app.S.units[0]), 'toggling back on restores the split');
-  t.ok(!app.S.units[0].engines.off, 'and clears the off flag');
+  u = saveForm({ f_serial: '1LS01712/14', f_kw: '1000', f_hours: '3243', f_kvaA: '625', f_kvaB: '625' });
+  t.eq(F.engName(u, 'A'), 'Gen A', 'and A/B writes Gen A');
 
-  t.group('bigiron: toggle-off IS gated once observations are tagged to an engine');
-  convFixture();
-  F.tpseg(btn('yes'));
-  F.lsseg(btn('AB'));
-  app.document.getElementById('f_kvaA').value = '625';
-  app.document.getElementById('f_kvaB').value = '625';
-  app.document.getElementById('f_hrsB').value = '118';
-  F.saveUnit('cv');
-  t.eq(F.engTagged(app.S.units[0]).total, 1, 'one observation is now tagged to an engine');
-  clear('tw_confirm');
-  F.tpseg(btn('no'));
-  app.document.getElementById('f_serial').value = 'TGD62501';
-  F.saveUnit('cv');
-  t.ok(F.isTwin(app.S.units[0]), 'the save does NOT quietly toggle off');
-  sh = app.document.getElementById('sheet').innerHTML;
-  t.includes(sh, 'Type TWINPAK to confirm', 'a typed gate appears instead');
-  t.includes(sh, '1 check tagged Gen B', 'naming exactly what would be stranded');
-  t.includes(sh, 'Nothing is deleted', 'and stating plainly that nothing is deleted');
-  t.includes(sh, 'Keep TwinPak on', 'with a way out that changes nothing');
-  app.document.getElementById('tw_confirm').value = 'TWIN';
-  F.doTwinOff('cv');
-  t.ok(F.isTwin(app.S.units[0]), 'a partial confirmation refuses');
-  app.document.getElementById('tw_confirm').value = 'twinpak';
-  F.doTwinOff('cv');
-  u = app.S.units[0];
-  t.ok(!F.isTwin(u), 'typing TWINPAK turns it off (case-insensitive, like the delete gate)');
-  t.ok(F.engArchived(u), 'still preserved after the gated toggle-off');
-  t.eq(u.engines.B.kvaEach, 625, 'nameplates kept');
-  t.ok(app.S.reports.some((x) => x.engine === 'B'), 'and the tagged check is still in history');
-
-  /* ---------------------------------------------------------------- */
-  /* Binding-pass progress must be visible from the Fleet list. Inherited pre-split
-     hours are NOT a reading for Engine A — otherwise a tech who skips A because
-     "the app already has it" leaves A's countdown running on an unattributable
-     number, which is the freeze failure rebuilt inside the fix. */
   t.group('bigiron: an engine without its OWN meter reading is flagged on the card');
   app.setState({ shows: [{ id: 's1', name: 'Fest' }], currentShowId: 's1',
     units: [twin()], reports: [] });
@@ -580,21 +575,6 @@ module.exports = async (app, t) => {
   t.excludes(F.unitCard(app.S.units[0], 's1'), 'TWINPAK', 'a single-engine card is unchanged');
   t.eq(F.twinGaps(app.S.units[0]).length, 0, 'and has no engine gaps by definition');
 
-  t.group('bigiron: a tagged issue alone earns the gate');
-  app.setState({ units: [twin()], reports: [], issues: [
-    { id: 'i1', unitId: 'tw', engine: 'B', severity: 'down', title: 'No start', timestamp: 1, resolved: false }] });
-  const tg = F.engTagged(app.S.units[0]);
-  t.eq(tg.total, 1, 'a tagged issue with no tagged checks still counts');
-  t.includes(tg.parts.join(' '), 'issue tagged Gen B', 'and is named in the warning');
-
-  /* ---------------------------------------------------------------- */
-  /* HANDOFF §8 rule 4. The fleet spans multiple manufacturers with different serial
-     schemes — different lengths, some with dashes, some with slashes — so there is
-     no fleet-wide format to validate against. Any length check, pattern match or
-     "did you mean" would reject real equipment and, worse, prime a tech to distrust
-     what they actually read off the plate. Normalisation is case + whitespace ONLY.
-     These assertions exist so a future filter, roster or CSV import cannot quietly
-     reintroduce validation. */
   t.group('bigiron: serial format is NEVER validated (rule 4)');
   [['1LS01712/14', '1LS01712/14'],
    ['C5E02984-85', 'C5E02984-85'],
@@ -661,4 +641,34 @@ module.exports = async (app, t) => {
   ] });
   t.eq(app.S.units.slice().sort(F.byKva).map((x) => x.id).join(','), 'sm,big,dn',
     'kVA ascending still wins, and a down unit still sinks below everything');
+
+  /* ---------------------------------------------------------------- */
+  /* Field copy on the conversion form. A tech on a phone in daylight needs WHAT to
+     do, not WHY it works. The nameplate instruction is dead weight once the NES
+     import pre-fills kVA, so it only appears while a rating is still blank. */
+  t.group('bigiron: conversion form copy is field-usable');
+  const form = (eng) => {
+    app.setState({ settings: tech(), units: [twin({ engines: eng })], reports: [] });
+    F.editUnit('tw');
+    return app.document.getElementById('sheet').innerHTML;
+  };
+  const blankK = form({ style: 'AB', A: {}, B: {} });
+  const fullK = form({ style: 'AB', A: { kvaEach: 500 }, B: { kvaEach: 500 } });
+  const halfK = form({ style: 'AB', A: { kvaEach: 500 }, B: {} });
+  t.includes(blankK, 'From each engine', 'nameplate hint shows while a rating is blank');
+  t.excludes(fullK, 'From each engine', 'and disappears once both ratings are in (the post-import case)');
+  t.includes(halfK, 'From each engine', 'still shows when only one rating is filled');
+  t.includes(fullK, 'Engine 1 hours', 'the hours field is labelled plainly');
+  t.excludes(fullK, 'meter now', 'the old "meter now" label is gone');
+  t.includes(fullK, 'What each meter reads right now', 'hours hint says what to do');
+  t.includes(fullK, 'read the meter', 'and the placeholder stays');
+  t.excludes(fullK, 'derate', 'no derate theory anywhere on the form');
+  t.excludes(fullK, 'package rating split', 'and no theory in the conditional hint either');
+  t.excludes(fullK, 'intake check', 'no storage-implementation detail on the form');
+  t.excludes(fullK, 'pre-split', 'and no explanation of where old history lands');
+  const twinBlock = (h) => h.slice(h.indexOf('True TwinPak'), h.indexOf("can't read it") + 20);
+  t.excludes(twinBlock(fullK), '—', 'no em dashes anywhere in the TwinPak block copy');
+  t.excludes(twinBlock(blankK), '—', 'including the conditional nameplate hint');
+  t.excludes(fullK, 'tp_seg', 'no TwinPak toggle on the form at all');
+  t.includes(fullK, 'ls_seg', 'an existing twin still gets the housing label picker');
 };
