@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-30 serial-hint -->
+<!-- fleetview build 2026-07-31 alert-gating -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -351,7 +351,32 @@ function openIssuesFor(id){return issuesFor(id).filter(i=>!i.resolved);}
 function lastReport(id){return reportsFor(id)[0]||null;}
 function latestFuel(u){const r=reportsFor(u.id).find(r=>r.fuelLevelPct!=null);return r?r.fuelLevelPct:null;}
 function lastCheckTs(u){const r=lastReport(u.id);return r?r.timestamp:null;}
-function isStale(u){if(isTwin(u))return ENG.some(e=>engStale(u,e));if(u.opStatus==='down')return false;const t=lastCheckTs(u);const h=(S.settings.staleHours||6)*3600e3;return !t||(now()-t)>h;}
+/* ===== ALERT PREDICATES — one definition per alert, used by every surface =====
+   The Alerts screen, the nav badge and job health all read these, so no surface can
+   drift from another. Gating lives HERE rather than in a render filter, because the
+   question "does this unit owe me something?" is a property of the unit, not of the
+   screen you happen to be on.
+
+   owesCheck: a unit that isn't on a job can't be checked, and a staged unit has
+   nothing to observe yet — 20 generators placed in a day, some not running for a
+   week, must not nag. So: on a job AND running, then the staleness clock.
+   lowFuel: fuel on a staged machine isn't news. Running only.
+   isHardDown / needsService: fire regardless of assignment. A machine broken or
+   overdue for service in the Jersey shop is precisely what the service department
+   needs to see — that's the point of the app. Service won't flood, because a unit
+   with blank hours has no countdown at all. */
+function onJob(u){return !!u&&u.locationType==='show';}
+function owesCheck(u,e){
+  if(!onJob(u))return false;
+  const st=e?engStatus(u,e):((u&&u.opStatus)||'staged');
+  if(st!=='running')return false;
+  const t=e?engLastTs(u,e):lastCheckTs(u);
+  const h=(S.settings.staleHours||6)*3600e3;
+  return !t||(now()-t)>h;}
+function isStale(u){if(isTwin(u))return ENG.some(e=>owesCheck(u,e));return owesCheck(u,null);}
+function lowFuel(u){const f=latestFuel(u);return f!=null&&f<20&&chassisStatus(u)==='running';}
+function isHardDown(u){return computeStatus(u).color==='red';}
+function needsService(u){const s=serviceState(u).state;return s==='over'||s==='soon';}
 function unitGps(u){let best=null;S.movements.filter(m=>m.unitId===u.id).forEach(e=>{if(e.gps&&(!best||e.timestamp>best.ts))best={ts:e.timestamp,g:e.gps};});return best?best.g:null;}
 function dayOfShow(s){if(!s||!s.startDate)return null;const a=new Date(s.startDate);a.setHours(0,0,0,0);const b=new Date();b.setHours(0,0,0,0);const d=Math.floor((b-a)/86400000)+1;return d>=1?d:null;}
 function requireTech(cb){if(S.settings.techName){cb();return;}
@@ -414,7 +439,7 @@ function chassisStatus(u){
   return 'staged';}
 function downEngines(u){return isTwin(u)?ENG.filter(e=>engStatus(u,e)==='down'):[];}
 function engLastTs(u,e){const r=engReports(u,e)[0];return r?r.timestamp:null;}
-function engStale(u,e){if(engStatus(u,e)==='down')return false;const t=engLastTs(u,e);const h=(S.settings.staleHours||6)*3600e3;return !t||(now()-t)>h;}
+function engStale(u,e){return owesCheck(u,e);}
 /* Has this engine ever had hours read off ITS OWN meter? Inherited pre-split hours
    do NOT count: a deterministic assignment of old merged history makes it
    consistent, not correct. Until each engine has its own observed reading, its
@@ -455,7 +480,9 @@ function computeStatus(u){
   if(st==='running')return{color:'green',label:'RUNNING',reasons};
   return{color:'grey',label:'STAGED',reasons};
 }
-function needsAttention(u){const c=computeStatus(u).color;return c==='red'||c==='orange'||isStale(u);}
+/* The badge is the union of the four alert sections, by construction — so the number
+   on the tab can never disagree with what you find when you open it. */
+function needsAttention(u){return isHardDown(u)||needsService(u)||lowFuel(u)||isStale(u);}
 /* ===== JOB HEALTH ===== */
 function jobHealth(s){const us=unitsOnShow(s.id);let down=0,overdue=0,last=0;us.forEach(u=>{if(computeStatus(u).color==='red')down++;if(isStale(u))overdue++;});
   [...S.reports,...S.issues,...S.movements].forEach(e=>{const u=unitById(e.unitId);if(u&&u.locationType==='show'&&u.locationId===s.id&&e.timestamp>last)last=e.timestamp;});
@@ -476,7 +503,7 @@ function render(){applyTheme();refreshTopBar();updateBadge();const v=$('#view');
 function refreshTopBar(){const s=currentShow();$('#jobIc').innerHTML=IC[S.settings.jobIcon]||IC.jobs;
   if(s){const d=dayOfShow(s);$('#showName').textContent=s.name;$('#showSub').textContent=(d?('Day '+d+' · '):'')+unitsOnShow(s.id).length+' units';}
   else{$('#showName').textContent='Select a job';$('#showSub').textContent=S.shows.length+' jobs';}}
-function updateBadge(){const n=S.units.filter(u=>u.locationType==='show'&&needsAttention(u)).length;const b=$('#alertBadge');if(b){b.textContent=n;b.classList.toggle('on',n>0);}}
+function updateBadge(){const n=S.units.filter(needsAttention).length;const b=$('#alertBadge');if(b){b.textContent=n;b.classList.toggle('on',n>0);}}
 /* ===== CARDS ===== */
 function statusPill(cs){return `<span class="pill" style="background:${SC[cs.color]}${cs.color==='yellow'?';color:#4a3a00':''}">${cs.label}</span>`;}
 function fuelBar(u){const f=latestFuel(u);if(f==null)return '';const c=f<20?'var(--red)':(f<50?'var(--orange)':'var(--green)');
@@ -621,11 +648,11 @@ function initPinMap(st){const el=$('#pinmap');if(!el||typeof L==='undefined')ret
 function setPin(lat,lng){if(!pinMap)return;const icon=L.divIcon({className:'',html:'<div style="width:18px;height:18px;border-radius:50%;background:#c77455;border:3px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.35)"></div>',iconSize:[18,18]});if(pinMarker){pinMarker.setLatLng([lat,lng]);}else{pinMarker=L.marker([lat,lng],{icon,draggable:true}).addTo(pinMap);pinMarker.on('dragend',()=>{const p=pinMarker.getLatLng();pinLL={lat:+p.lat.toFixed(6),lng:+p.lng.toFixed(6)};});}pinLL={lat:+(+lat).toFixed(6),lng:+(+lng).toFixed(6)};}
 function savePin(unitId){if(!pinLL){toast('Tap the map to place the pin');return;}const u=unitById(unitId);if(!u)return;requireTech(()=>{S.movements.push({id:uid('mv'),unitId,fromType:u.locationType,fromId:u.locationId,toType:u.locationType,toId:u.locationId,techName:S.settings.techName,timestamp:now(),gps:{lat:pinLL.lat,lng:pinLL.lng,acc:0}});u.updatedAt=now();save();closeSheet();openUnit(unitId);toast('Pin saved');});}
 /* ===== ALERTS ===== */
-function renderAlerts(){const on=S.units.filter(u=>u.locationType==='show');
-  const down=on.filter(u=>computeStatus(u).color==='red');
-  const svc=on.filter(u=>{const s=serviceState(u).state;return s==='over'||s==='soon';});
-  const low=on.filter(u=>{const f=latestFuel(u);return f!=null&&f<20;});
-  const stale=on.filter(u=>isStale(u));
+function renderAlerts(){const all=S.units;
+  const down=all.filter(isHardDown);
+  const svc=all.filter(needsService);
+  const low=all.filter(lowFuel);
+  const stale=all.filter(isStale);
   const sec=(title,arr,ic,color)=>arr.length?`<h2 class="section sm" style="margin-top:16px;color:${color||'var(--ink)'}">${title} (${arr.length})</h2>${arr.map(u=>unitCard(u,u.locationId)).join('')}`:'';
   const total=new Set([...down,...svc,...low,...stale].map(u=>u.id)).size;
   return `<div class="between"><h2 class="section" style="margin:0">Alerts</h2><button class="btn dark sm" onclick="openReport(S.currentShowId)">Report</button></div>
