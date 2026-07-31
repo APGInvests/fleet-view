@@ -206,3 +206,29 @@ select count(*) as any_style_set from units where engines->>'style' is not null;
 select count(*) as imported_with_hours from units where location_type='fleet' and (current_hours is not null or service_due_hours is not null);  -- expect 0
 -- the held-out transposition must NOT have been created:
 select serial from units where serial in ('UVC700618','UCV700618');      -- expect UCV700618 only
+
+-- ============================================================
+-- POST-RUN VERIFICATION -- one query, one row, run once.
+-- Expected values are in the comment beside each column.
+-- ============================================================
+select
+  (select count(*) from units)                                  as total_units,          -- 212
+  (select count(*) from units where klass='big')                as big_iron,             -- 153
+  (select count(*) from units where klass='small')              as small_iron,           --  59
+  (select count(*) from units where engines is not null)        as twins,                --  50
+  (select count(*) from units where op_status='down')           as hard_down,            --  21
+  (select count(*) from units where location_type='fleet')      as unassigned,           -- 134
+  (select count(*) from units
+     where location_type='fleet'
+       and (current_hours is not null
+         or service_due_hours is not null))                     as imported_with_hours,  --   0
+  (select count(*) from units where engines->>'style' is not null)
+                                                                as style_set,            --   0
+  (select count(*) from units where serial='UVC700618')         as transposed_created,   --   0
+  (select count(*) from units a join units b
+      on a.id <> b.id
+     and upper(regexp_replace(coalesce(a.serial,''),'[^A-Za-z0-9]','','g'))
+       = upper(regexp_replace(coalesce(b.serial,''),'[^A-Za-z0-9]','','g')))
+                                                                as dup_serial_rows;      --   2
+-- dup_serial_rows = 2 is the KNOWN D19701 / D19701. pair, counted in both directions.
+-- Any number above 2 means the import created a duplicate. It should not be able to.
