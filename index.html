@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-30 twinpak-progress -->
+<!-- fleetview build 2026-07-30 serial-hint -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -815,7 +815,7 @@ function editUnit(id,prefillTag){const u=id?unitById(id):{};const isNew=!id;form
   const locOpts=[...S.shows.map(s=>`<option value="show:${s.id}" ${(currentShow()&&currentShow().id===s.id)?'selected':''}>${esc(s.name)}</option>`),...S.shops.map(s=>`<option value="shop:${s.id}">${esc(s.name)}</option>`)].join('');
   sheet(isNew?'Add asset':'Edit asset',`${isNew&&prefillTag?`<div class="banner">🆕 New asset <b>${esc(prefillTag)}</b> — fill in once; it's linked to this unit forever.</div>`:''}
     <label class="fld"><span class="lb">Type</span><div class="segwrap" id="t_seg"><button type="button" data-v="small" class="${(u.klass!=='big')?'on':''}" style="${u.klass!=='big'?'background:var(--accent);color:#fff':''}" onclick="tseg(this)">Small iron</button><button type="button" data-v="big" class="${u.klass==='big'?'on':''}" style="${u.klass==='big'?'background:var(--accent);color:#fff':''}" onclick="tseg(this)">Big iron</button></div></label>
-    <label class="fld"><span class="lb">Serial #</span><input id="f_serial" value="${esc(u.serial||prefillTag||'')}" placeholder="e.g. A246B12359" autocapitalize="characters" autocorrect="off" spellcheck="false" style="text-transform:uppercase"/></label>
+    <label class="fld"><span class="lb">Serial #</span><input id="f_serial" value="${esc(u.serial||prefillTag||'')}" placeholder="e.g. A246B12359 or 1LS01712/14" autocapitalize="characters" autocorrect="off" spellcheck="false" style="text-transform:uppercase"/></label>
     <div class="grid2"><label class="fld"><span class="lb">Scan code (optional)</span><input id="f_tag" value="${esc(u.tagId||'')}" placeholder="QR/barcode, if any" autocapitalize="characters" autocorrect="off" spellcheck="false" style="text-transform:uppercase"/></label><label class="fld"><span class="lb">Weight (lb)</span><input id="f_weight" type="number" inputmode="decimal" value="${esc(u.weightLbs||'')}"/></label></div>
     <div class="grid2"><label class="fld"><span class="lb">Make</span><input id="f_make" value="${esc(u.make||'')}" placeholder="Cat, Cummins"/></label><label class="fld"><span class="lb">Model</span><input id="f_model" value="${esc(u.model||'')}" placeholder="XQ125"/></label></div>
     <div class="grid2"><label class="fld"><span class="lb">Rating (kVA)</span><input id="f_kw" type="number" inputmode="decimal" value="${esc(u.kw||'')}"/></label><label class="fld"><span class="lb">Breaker</span><input id="f_breaker" value="${esc(u.breakerSize||'')}" placeholder="400A"/></label></div>
