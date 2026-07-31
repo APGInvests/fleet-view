@@ -148,7 +148,8 @@ The company's **National Equipment Schedule** decides what counts as one piece o
   "B": { "kvaEach": 625 } }
 ```
 
-- **Presence of `engines` is the only authority.** `config` is free-text metadata and is *not* evidence (see §7).
+- **`engines` present AND not flagged `off` is the only authority.** `config` is free-text metadata and is *not* evidence (see §7).
+- **Turning the toggle off preserves the jsonb** — it sets `engines.off = true` rather than clearing it, so switching back on restores both nameplates and both service targets. An accidental toggle costs nothing. The jsonb is only ever nulled when it was malformed to begin with.
 - `style` is `"AB"` or `"12"`, whichever the housing is physically labelled. **Stored tags on `reports.engine` / `issues.engine` are always canonical `'A'`/`'B'`**, so relabelling the housing never breaks history.
 - **Hours are derived, never stored.** `engHours(u,'A')` takes the newest `engineHours` from checks tagged `'A'` *or* untagged — untagged history is pre-split and inherits to A, labelled "pre-split" in the UI. `engHours(u,'B')` takes tagged-`'B'` checks **only, with no fallback**, so a fresh Engine B reads "No checks yet" instead of inheriting the old merged meter. A merged "246h to service" is unanswerable — on which engine? — and removing it is the point of this model.
 - **Corrections are new checks**, never field edits. There is deliberately no editable hours field on a TwinPak.
@@ -158,6 +159,8 @@ The company's **National Equipment Schedule** decides what counts as one piece o
 - **`kvaEach` is read off each engine's nameplate and is the one required field in the app** — a deliberate, owner-approved exception to "every field optional", because conversion is a low-frequency setup flow done while standing at the machine. Per-engine load % divides by `kvaEach`, never by `kw/2`: paralleling gear and a shared bus derate the package, so half the package rating appears on no nameplate. A number nobody observed is the same failure as the merged hours.
 - Flat `currentHours` on a TwinPak is **only Engine A's pre-split seed**; flat `serviceDueHours` is ignored once `engines` exists. Single-engine units are untouched — zero churn on the ~34 records that already worked.
 - **Movements and map pins stay chassis-level.** You move a trailer, not an engine. There is no engine dimension on movements.
+
+**Toggling a split off is gated only when it would strand something.** With nothing tagged to an engine it applies silently. Once any check or issue carries an `engine` tag, saving with the toggle off does *not* apply — it opens a typed **TWINPAK** gate (same pattern as delete-from-fleet) naming exactly what would be stranded ("3 checks tagged Gen B"). The reason it earns a gate despite deleting nothing: while the split is off, engine-tagged hours stop feeding any countdown and the unit falls back to flat `currentHours`, which twin-era checks never updated — **so the service clock can read low until the split is turned back on**. Chassis `opStatus` reverts the same way; an engine-tagged *down issue* still forces red, which is the safety net.
 
 Invariants live in `tools/fv_inv_bigiron.js` and run on every preflight.
 
@@ -173,7 +176,7 @@ Invariants live in `tools/fv_inv_bigiron.js` and run on every preflight.
 
 **Bottom nav:** Jobs · Fleet · Map · Alerts, plus a floating **+ Add** button.
 
-On a **TwinPak** the single "Log check / Flag issue" pair on unit detail becomes **one row per engine** — each showing that engine's status dot, status word, hours and freshness, with its own Check and Flag buttons. Same tap count as a single unit, and the half-down split is visible without opening anything. The **True TwinPak toggle** lives in the big-iron section of the add/edit form: label style, both nameplate kVAs, and per-engine intake meter readings (which are logged as engine-tagged intake *checks*, not column writes).
+On a **TwinPak** the single "Log check / Flag issue" pair on unit detail becomes **one row per engine** — each showing that engine's status dot, status word, hours and freshness, with its own Check and Flag buttons. Same tap count as a single unit, and the half-down split is visible without opening anything. The **True TwinPak toggle** lives in the big-iron section of the add/edit form: label style, both nameplate kVAs, and per-engine intake meter readings (which are logged as engine-tagged intake *checks*, not column writes). Turning it back off keeps everything (§4) and is typed-gated only when engine-tagged observations exist.
 
 **Gesture contract — identical on every list:**
 | Gesture | Meaning |
