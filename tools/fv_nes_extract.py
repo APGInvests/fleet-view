@@ -34,6 +34,13 @@ def split_cell(cell):
     # 2. scan the serial head left-to-right
     m = TOKEN.match(stripped.lstrip())
     if not m or not _has_digit(m.group(0)):
+        # Owner rule, settled 2026-07-31: a few rows lead with the MANUFACTURER
+        # ("ATLAS CopCo #3 UVC700618"). There the serial is the TRAILING token and
+        # everything before it is notes. Requires >=4 chars and a digit, so the
+        # unit number "#3" can never be mistaken for an identity.
+        tail = [x for x in TOKEN.findall(stripped) if _has_digit(x) and len(x) >= 4]
+        if tail:
+            return tail[-1].upper(), _notes(orig, tail[-1]), None
         return "", [n for n in _notes(orig, "")], "NO SERIAL FOUND - needs a human"
     lead_ws = len(stripped) - len(stripped.lstrip())
     parts = [m.group(0)]
