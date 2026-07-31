@@ -8,11 +8,11 @@
 |---|---|
 | App units | 78 |
 | **Matched** | **17** |
-| **New from NES (insert)** | **135** |
+| **New from NES (insert)** | **134** — 135 NES-only rows minus `UVC700618`, held out |
 | Big-iron app units with no NES row | **2** — both are flagged items |
 | Small-iron app units | 59 — **no NES row by design, out of scope** |
 | NES rows that failed to parse | **0** |
-| Fleet after import | 78 + 135 = **213** |
+| Fleet after import | 78 + 134 = **212** |
 
 
 > **Correction to my earlier numbers.** I first reported 58 small-iron and 14 matched. Both were wrong. Keying app records by normalised serial in a dict silently collapsed `D19701` and `D19701.` into one entry, dropping a unit — **the same dedup blindness that created that duplicate in the first place.** Fixed by grouping instead of overwriting. Correct figure is 59 small iron. The ATLAS parse then took matched from 14 to 17.
@@ -102,7 +102,7 @@ Trailing period defeated dedup. Same model, same 15 kW, makes differing by one l
 
 ## 3. New records from the NES
 
-**135 inserts**, all unassigned, blank hours, no vitals, label style unset.
+**134 inserts** (the 135th, `UVC700618`, is held out — see 2a), all unassigned, blank hours, no vitals, label style unset.
 
 - **44** twins receive an engines object with per-engine kVA from the classification
 - **21** import as `down` (NES hard-down), the other 114 as `staged`
@@ -178,3 +178,50 @@ select make, count(*) from units where coalesce(make,'')<>'' group by make order
 
 `X1CH30847` already reads **`Hipower`**. The prefix rule derives **`HiPower`** for the 32 incoming U122/U121 rows. Never-overwrite means both spellings end up in the fleet — a new inconsistency, created by this import, of exactly the kind you just asked me to clean up. Either derive `Hipower` to match what exists, or add `update units set make='HiPower' where make='Hipower';` above. **Not decided, not applied.**
 
+
+## 7. What `kw` means on a twin — audit, no change made
+
+You spotted this and it is real. After the import, `kw` carries two different meanings across six twins:
+
+| Serial | NES package | app `kw` | Reads as |
+|---|---|---|---|
+| `1LS01712/14` | 1000 | 500 *(keep)* | **per-engine** |
+| `C5E02269/70` | 1000 | 500 *(keep)* | **per-engine** |
+| `TGD62501` | 1250 | 1257 *(keep)* | package |
+| `TGD62504` | 1250 | 1257 *(keep)* | package |
+| `TGD62507` | 1250 | 1257 *(keep)* | package |
+| `C5E02984-85` | 750 | blank → **750** | package |
+
+### Q1. Everywhere `kw` is READ
+
+Audited every occurrence, not recalled:
+
+| Surface | Uses `kw` | Effect of a wrong value |
+|---|---|---|
+| `byKva` sort | yes | a 1000 kVA twin sorts in among the 500s |
+| `assetLabel` card headline | yes, when the unit has no per-job name | card reads "500 kVA · VIP South" |
+| `paneInfo` Rating row | yes | Info tab shows 500 |
+| Job-detail search haystack | yes | searching "1000 kva" misses it |
+| Fleet/scan search + result subtitle | yes | same |
+| **Per-engine load %** | **NO** | `engKva(u,e)` returns `engines[e].kvaEach` on a twin and never reads `kw`. `logVitals` and `saveVitals` both go through it. |
+| **Service math** | **NO** | per-engine targets and derived hours only |
+| **Alerts, status colours** | **NO** | — |
+| **End-of-show report** | **NO** | it prints serial, make/model, status, hours, service remaining and issues. **No rating at all.** |
+
+**Blast radius is display, sort and search. Nothing computational.** Load % was the one that would have mattered and it is already clean, because `kvaEach` took over that job when the engines layer shipped.
+
+### Q2. Does filling `C5E02984-85` with 750 deepen the split?
+
+**No — it joins the majority.** Counting all six twins rather than the three in your list: **three already hold a package figure** (the TGDs at 1257), and filling this one makes it **four package versus two per-engine**. It also matches your instinct that `kw` should be the chassis rating.
+
+Leaving it blank is worse than either side. `byKva` maps blank to `Infinity`, so the unit sorts to the **bottom** of every job and fleet list, its card headline falls back to make/model with no rating, and the Info tab shows a dash. A blank is not neutral here — it is a third behaviour.
+
+So: **fill it in the import** (gap-fill, correct), and if you want `kw` to mean package everywhere, that is a **two-record overwrite** belonging in the separate statement:
+
+```sql
+-- NOT part of the import. Overwrites, run alongside the make normalisation.
+update units set kw=1000, updated_at=now() where serial='1LS01712/14' and kw=500;
+update units set kw=1000, updated_at=now() where serial='C5E02269/70' and kw=500;
+```
+
+The three TGDs stay at **1257**, not 1250: someone read real nameplates and that beats the conversion.
