@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-30 twinpak-convert -->
+<!-- fleetview build 2026-07-30 twinpak-toggle-safe -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -366,7 +366,21 @@ function saveTech(){const v=$('#techIn').value.trim();if(!v){toast('Enter your n
    untagged history is pre-split and inherits to A; B NEVER falls back, so a fresh
    Engine B reads "no checks yet" instead of inheriting the old merged meter. */
 const ENG=['A','B'];
-function isTwin(u){const e=u&&u.engines;return !!(e&&typeof e==='object'&&!Array.isArray(e)&&(e.A||e.B));}
+/* `engines.off` means STOP USING the split, not forget it. Turning the toggle back
+   on restores both nameplates and both service targets, so an accidental toggle
+   costs nothing. The jsonb is only ever cleared when it was malformed. */
+function isTwin(u){const e=u&&u.engines;return !!(e&&typeof e==='object'&&!Array.isArray(e)&&(e.A||e.B)&&!e.off);}
+function engArchived(u){const e=u&&u.engines;return !!(e&&typeof e==='object'&&!Array.isArray(e)&&(e.A||e.B)&&e.off);}
+/* What a toggle-off would strand: observations tagged to an engine that the unit
+   would no longer have. Used to decide whether the toggle needs a typed gate. */
+function engTagged(u){
+  if(!u)return{total:0,parts:[]};
+  const rs=S.reports.filter(r=>r.unitId===u.id&&r.engine);
+  const is=S.issues.filter(i=>i.unitId===u.id&&i.engine);
+  const parts=[];
+  ENG.forEach(e=>{const n=rs.filter(r=>r.engine===e).length;if(n)parts.push(n+' check'+(n===1?'':'s')+' tagged '+engName(u,e));});
+  ENG.forEach(e=>{const n=is.filter(i=>i.engine===e).length;if(n)parts.push(n+' issue'+(n===1?'':'s')+' tagged '+engName(u,e));});
+  return{total:rs.length+is.length,reports:rs.length,issues:is.length,parts};}
 function engList(u){return isTwin(u)?ENG.slice():[null];}
 function engStyle(u){return (u&&u.engines&&u.engines.style==='12')?'12':'AB';}
 function engName(u,e){if(!e)return '';return 'Gen '+(engStyle(u)==='12'?(e==='A'?'1':'2'):e);}
@@ -799,6 +813,7 @@ function editUnit(id,prefillTag){const u=id?unitById(id):{};const isNew=!id;form
     <div id="bigFields" style="display:${u.klass==='big'?'block':'none'}"><div class="grid2"><label class="fld"><span class="lb">Config</span><select id="f_config"><option value="">—</option>${['Single 300kW','Single 500kW','TwinPak','Double 500kW'].map(c=>`<option ${u.config===c?'selected':''}>${c}</option>`).join('')}</select></label><label class="fld"><span class="lb">Trailer #</span><input id="f_trailer" value="${esc(u.trailer||'')}"/></label></div>
       <label class="fld"><span class="lb">True TwinPak — two engines, one housing, one serial</span><div class="segwrap" id="tp_seg"><button type="button" data-v="no" class="${!isTwin(u)?'on':''}" style="${!isTwin(u)?'background:var(--accent);color:#fff':''}" onclick="tpseg(this)">One engine</button><button type="button" data-v="yes" class="${isTwin(u)?'on':''}" style="${isTwin(u)?'background:var(--accent);color:#fff':''}" onclick="tpseg(this)">TwinPak</button></div></label>
       <p class="muted" style="font-size:11px;margin:-4px 0 10px">Only for machines permanently paired in one housing — one NES line item. Generators that can be swapped off a shared chassis each get their own record.</p>
+      ${engArchived(u)?'<p class="muted" style="font-size:11px;margin:-6px 0 10px;color:var(--orange)">TwinPak is off for this unit, but both nameplates and service targets are still saved. Switch back to TwinPak to use them again.</p>':''}
       <div id="twinFields" style="display:${isTwin(u)?'block':'none'}">
         <label class="fld"><span class="lb">How is the housing labelled?</span><div class="segwrap" id="ls_seg"><button type="button" data-v="AB" class="${engStyle(u)==='AB'?'on':''}" style="${engStyle(u)==='AB'?'background:var(--accent);color:#fff':''}" onclick="lsseg(this)">Gen A / Gen B</button><button type="button" data-v="12" class="${engStyle(u)==='12'?'on':''}" style="${engStyle(u)==='12'?'background:var(--accent);color:#fff':''}" onclick="lsseg(this)">Gen 1 / Gen 2</button></div></label>
         <div class="grid2"><label class="fld"><span class="lb">Engine 1 nameplate kVA <b style="color:var(--red)">*</b></span><input id="f_kvaA" type="number" inputmode="decimal" value="${esc(engMeta(u,'A').kvaEach!=null?engMeta(u,'A').kvaEach:'')}" placeholder="off the nameplate"/></label><label class="fld"><span class="lb">Engine 2 nameplate kVA <b style="color:var(--red)">*</b></span><input id="f_kvaB" type="number" inputmode="decimal" value="${esc(engMeta(u,'B').kvaEach!=null?engMeta(u,'B').kvaEach:'')}" placeholder="off the nameplate"/></label></div>
@@ -841,10 +856,30 @@ function saveUnit(id){let ser=$('#f_serial').value.trim().toUpperCase();let tag=
          so re-saving a converted unit does not manufacture duplicate readings. */
       ENG.forEach(e=>{const el=$('#f_hrs'+e);const v=el?num(el.value):null;if(v==null)return;
         S.reports.push({id:uid('rpt'),unitId:u.id,showId:S.currentShowId,techName:S.settings.techName,timestamp:now(),gps:null,engine:e,engineHours:v,notes:'Intake reading at TwinPak split',voltageLL:null,voltageLN:null,ampsL1:null,ampsL2:null,ampsL3:null,hz:null,loadKw:null,loadPct:null,coolantTemp:null,oilPressure:null,fuelLevelPct:null,batteryV:null,defPct:null});});
+    } else if(u.engines&&typeof u.engines==='object'&&!Array.isArray(u.engines)&&(u.engines.A||u.engines.B)){
+      /* Toggling off PRESERVES the jsonb. Free when nothing is tagged to an engine;
+         gated when real observations would be stranded (see confirmTwinOff). */
+      if(isTwin(u)&&engTagged(u).total>0)twinOffPending=u.id;
+      else u.engines=Object.assign({},u.engines,{off:true});
     } else if(u.engines){u.engines=null;}
     u.fuelType=$('#f_fuel').value.trim();u.tankGallons=num($('#f_tank').value);u.currentHours=num($('#f_hours').value);u.serviceDueHours=num($('#f_svc').value);const _psid=(u.locationType==='show'&&u.locationId)?u.locationId:S.currentShowId;if(_psid){u.jobMeta=u.jobMeta||{};u.jobMeta[_psid]=Object.assign({},u.jobMeta[_psid],{area:$('#f_area').value.trim()});}u.notes=$('#f_notes').value.trim();u.updatedAt=now();
     if(isNew){const lv=($('#f_loc')&&$('#f_loc').value)||('show:'+(S.currentShowId||''));const[lt,lid]=lv.split(':');u.locationType=lt;u.locationId=lid;const _push=g=>{S.movements.push({id:uid('mv'),unitId:u.id,fromType:null,fromId:null,toType:lt,toId:lid,techName:S.settings.techName,timestamp:now(),gps:g||null});save();closeSheet();openUnit(u.id);toast(g?'Added · location pinned':'Added — no pin yet (set location later)');};if(formGps)_push(formGps);else captureGPS(_push);}
-    else{if(formGps){S.movements.push({id:uid('mv'),unitId:u.id,fromType:u.locationType,fromId:u.locationId,toType:u.locationType,toId:u.locationId,techName:S.settings.techName,timestamp:now(),gps:formGps});}save();closeSheet();openUnit(u.id);toast(formGps?'Saved · location pinned':'Saved');}});}
+    else{if(formGps){S.movements.push({id:uid('mv'),unitId:u.id,fromType:u.locationType,fromId:u.locationId,toType:u.locationType,toId:u.locationId,techName:S.settings.techName,timestamp:now(),gps:formGps});}save();closeSheet();if(twinOffPending){const _t=twinOffPending;twinOffPending=null;confirmTwinOff(_t);}else{openUnit(u.id);toast(formGps?'Saved · location pinned':'Saved');}}});}
+let twinOffPending=null;
+/* Typed gate, same pattern as delete-from-fleet — but a much smaller blast radius,
+   so the copy has to be honest about that: nothing is deleted. The reason this
+   earns a gate at all is that while the split is off, engine-tagged hours stop
+   feeding any countdown and the unit falls back to the flat pre-split meter, which
+   twin-era checks never updated. The numbers regress; the records don't vanish. */
+function confirmTwinOff(id){const u=unitById(id);if(!u)return;const c=engTagged(u);const seed=(u.currentHours!=null)?(Number(u.currentHours).toLocaleString()+' h'):'no recorded hours';
+  sheet('Turn off TwinPak',`<div class="banner" style="background:rgba(226,130,63,.14);border-color:rgba(226,130,63,.42)">⚠️ <b>#${esc(u.serial||u.tagId||'asset')}</b> has readings tagged to each engine.<br><span class="muted">${esc(c.parts.join(' · '))}</span></div>
+    <p style="margin:13px 0 4px"><b>Nothing is deleted.</b> Both nameplate ratings and both service targets stay saved — turn TwinPak back on and they come straight back, along with per-engine hours.</p>
+    <p style="margin:10px 0 4px">While it's off, those tagged readings stay in the check log but <b>stop feeding a per-engine countdown</b>. The unit's hours fall back to the pre-split meter — <b>${esc(seed)}</b> — which checks logged per engine never updated. So the service clock may read low until you turn it back on.</p>
+    <label class="fld" style="margin-top:12px"><span class="lb">Type TWINPAK to confirm</span><input id="tw_confirm" placeholder="TWINPAK" autocapitalize="characters" autocorrect="off" spellcheck="false" style="text-transform:uppercase" oninput="twGate()"/></label>
+    <button id="tw_btn" class="btn danger block" style="opacity:.4;pointer-events:none" onclick="doTwinOff('${id}')">Turn off TwinPak</button>
+    <button class="btn ghost block" style="margin-top:9px" onclick="closeSheet()">Keep TwinPak on</button>`);}
+function twGate(){const e=$('#tw_confirm'),b=$('#tw_btn');if(!e||!b)return;const ok=String(e.value||'').trim().toUpperCase()==='TWINPAK';b.style.opacity=ok?'1':'.4';b.style.pointerEvents=ok?'auto':'none';}
+function doTwinOff(id){const e=$('#tw_confirm');if(!e||String(e.value||'').trim().toUpperCase()!=='TWINPAK'){toast('Type TWINPAK to confirm');return;}const u=unitById(id);if(!u)return;if(u.engines&&typeof u.engines==='object'&&!Array.isArray(u.engines))u.engines=Object.assign({},u.engines,{off:true});u.updatedAt=now();save();closeSheet();openUnit(id);toast('TwinPak off — nameplates and targets kept');}
 function confirmDeleteUnit(id){const u=unitById(id);if(!u)return;const nR=S.reports.filter(r=>r.unitId===id).length,nI=S.issues.filter(i=>i.unitId===id).length,nM=S.movements.filter(m=>m.unitId===id).length;const nP=(u.photos?u.photos.length:0)+S.issues.filter(i=>i.unitId===id).reduce((n,i)=>n+((i.photos&&i.photos.length)||0),0);const bits=[nR+' check'+(nR===1?'':'s'),nI+' issue'+(nI===1?'':'s'),nM+' movement'+(nM===1?'':'s')];if(nP)bits.push(nP+' photo'+(nP===1?'':'s'));sheet('Delete from fleet',`<div class="banner" style="background:rgba(217,88,79,.14);border-color:rgba(217,88,79,.42)">⚠️ <b>#${esc(u.serial||u.tagId||'asset')}</b> — ${esc([u.make,u.model].filter(Boolean).join(' ')||'asset')}<br><span class="muted">now at ${esc(whereIs(u))}</span></div><p style="margin:13px 0 4px">This permanently removes the asset <b>and its entire history</b>, for everyone on the team:</p><p style="margin:0 0 12px;font-family:var(--mono);font-size:13px;color:var(--red)">${bits.join(' · ')}</p><p class="muted" style="font-size:12.5px;margin:0 0 12px">Just taking it off a job? Swipe it left on the job screen and choose <b>Off job</b> — that keeps the record.</p><label class="fld"><span class="lb">Type DELETE to confirm</span><input id="del_confirm" placeholder="DELETE" autocapitalize="characters" autocorrect="off" spellcheck="false" style="text-transform:uppercase" oninput="delGate()"/></label><button id="del_btn" class="btn danger block" style="opacity:.4;pointer-events:none" onclick="doDeleteUnit('${id}')">Delete permanently</button><button class="btn ghost block" style="margin-top:9px" onclick="closeSheet()">Cancel</button>`);setTimeout(()=>{const e=$('#del_confirm');if(e)e.focus();},140);}
 function delGate(){const e=$('#del_confirm'),b=$('#del_btn');if(!e||!b)return;const ok=String(e.value||'').trim().toUpperCase()==='DELETE';b.style.opacity=ok?'1':'.4';b.style.pointerEvents=ok?'auto':'none';}
 function doDeleteUnit(id){const e=$('#del_confirm');if(!e||String(e.value||'').trim().toUpperCase()!=='DELETE'){toast('Type DELETE to confirm');return;}const u=unitById(id);const lbl=(u&&(u.serial||u.tagId))||'asset';S.units=S.units.filter(x=>x.id!==id);S.reports=S.reports.filter(r=>r.unitId!==id);S.issues=S.issues.filter(i=>i.unitId!==id);S.movements=S.movements.filter(m=>m.unitId!==id);save();closeSheet();render();toast('Deleted #'+lbl);}
