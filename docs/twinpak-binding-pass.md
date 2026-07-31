@@ -36,9 +36,10 @@ The app will *let* you save without the meters — only the two nameplate rating
 
 # Before you start
 
-- [ ] Open this on your phone once, so you're on the new version:
-      `https://apginvests.github.io/fleet-view/?v=1785461482`
-- [ ] Check you're on it: open any unit → **Log check**. There should be a **new card at the top** showing the serial and "LAST RECORDED" hours. No card = old version, force-close and reopen.
+- [ ] Open this on your phone once, so you're on the current version:
+      `https://apginvests.github.io/fleet-view/?v=1785463281`
+- [ ] **Check you have the toggle** — this is the thing you're about to use, so check for it directly. Open any big-iron unit → **Info** tab → **Edit info** → scroll to the big-iron section. You should see **True TwinPak** with **One engine / TwinPak** buttons.
+- [ ] **No True TwinPak toggle = old version.** Force-close the app, reopen it, and check again before you start. Don't work around it.
 - [ ] You need **two nameplate kVA ratings per machine**. The app refuses to save without both.
 
 ## Which engine is "Engine 1"?
