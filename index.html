@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-30 twinpak-ui -->
+<!-- fleetview build 2026-07-30 twinpak-convert -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -492,7 +492,11 @@ function confirmDeleteJob(id){const s=showById(id);if(!s)return;const n=S.units.
 function passFilter(u,f){if(f==='all')return true;if(f==='big')return u.klass==='big';if(f==='small')return u.klass!=='big';if(f==='down')return computeStatus(u).color==='red';if(f==='lowfuel'){const x=latestFuel(u);return x!=null&&x<20;}if(f==='service'){const s=serviceState(u).state;return s==='over'||s==='soon';}return true;}
 function filterBar(cur,fn){const F=[['all','All'],['big','Big iron'],['small','Small iron'],['down','Down'],['lowfuel','Low fuel'],['service','Service due']];
   return `<div class="filterbar">${F.map(([k,l])=>`<button class="fchip ${cur===k?'on':''} ${k==='down'?'down':''}" onclick="${fn}('${k}')">${l}</button>`).join('')}</div>`;}
-function byKva(a,b){const dn=u=>computeStatus(u).color==='red'?1:0;const da=dn(a),db=dn(b);if(da!==db)return da-db;const kv=v=>{if(v===null||v===undefined||v==='')return Infinity;const n=Number(v);return Number.isFinite(n)?n:Infinity;};const x=kv(a.kw),y=kv(b.kw);if(x!==y)return x-y;return String(a.serial||a.tagId||'').localeCompare(String(b.serial||b.tagId||''));}
+function byKva(a,b){const dn=u=>computeStatus(u).color==='red'?1:0;const da=dn(a),db=dn(b);if(da!==db)return da-db;const kv=v=>{if(v===null||v===undefined||v==='')return Infinity;const n=Number(v);return Number.isFinite(n)?n:Infinity;};const x=kv(a.kw),y=kv(b.kw);if(x!==y)return x-y;
+  /* Final tiebreak: the job label people actually say out loud when it's set,
+     otherwise the serial. Same-kVA units are indistinguishable by serial alone. */
+  const key=z=>{const sid=(z.locationType==='show'&&z.locationId)?z.locationId:S.currentShowId;const m=jm(z,sid);return String((m&&m.name)||z.serial||z.tagId||'');};
+  return key(a).localeCompare(key(b));}
 function sortUnits(list){return list.sort(byKva);}
 /* ===== JOBS ===== */
 function getFavs(){try{return JSON.parse(localStorage.getItem('fleetview_favs')||'[]');}catch(e){return [];}}
@@ -782,7 +786,7 @@ function saveJobMeta(unitId,sid){const u=unitById(unitId);if(!u)return;u.jobMeta
 function mapSetLoc(unitId){const u=unitById(unitId);if(!u)return;requireTech(()=>{toast('Getting location…');captureGPS(g=>{if(!g){toast('Location unavailable — allow location on your phone');return;}S.movements.push({id:uid('mv'),unitId,fromType:u.locationType,fromId:u.locationId,toType:u.locationType,toId:u.locationId,techName:S.settings.techName,timestamp:now(),gps:g});u.updatedAt=now();save();toast('Pinned to your location (±'+g.acc+'m)');if(typeof TAB!=='undefined'&&TAB==='map')render();else renderUnit(unitId);});});}
 function capturePlacement(unitId){const u=unitById(unitId);if(!u)return;requireTech(()=>{toast('Getting location…');captureGPS(g=>{if(!g){toast('Location unavailable — allow location on your phone');return;}S.movements.push({id:uid('mv'),unitId,fromType:u.locationType,fromId:u.locationId,toType:u.locationType,toId:u.locationId,techName:S.settings.techName,timestamp:now(),gps:g});u.updatedAt=now();save();renderUnit(unitId);toast('Placement captured (±'+g.acc+'m)');});});}
 /* ===== FORMS ===== */
-let segType='small';
+let segType='small',segTwin=false,segStyle='AB';
 function setFormGps(){const st=$('#f_gpsStatus');if(st)st.textContent='Getting location…';captureGPS(g=>{if(!g){if(st)st.textContent='Unavailable — allow location access';toast('Location unavailable — allow location on your phone');return;}formGps=g;if(st)st.textContent='✓ Set — '+g.lat+', '+g.lng+' (±'+g.acc+'m)';toast('Location set (±'+g.acc+'m)');});}
 function editUnit(id,prefillTag){const u=id?unitById(id):{};const isNew=!id;formGps=null;const _eg=id?unitGps(u):null;const gpsStat=_eg?('📍 '+_eg.lat+', '+_eg.lng):'No pin yet';
   const locOpts=[...S.shows.map(s=>`<option value="show:${s.id}" ${(currentShow()&&currentShow().id===s.id)?'selected':''}>${esc(s.name)}</option>`),...S.shops.map(s=>`<option value="shop:${s.id}">${esc(s.name)}</option>`)].join('');
@@ -792,20 +796,52 @@ function editUnit(id,prefillTag){const u=id?unitById(id):{};const isNew=!id;form
     <div class="grid2"><label class="fld"><span class="lb">Scan code (optional)</span><input id="f_tag" value="${esc(u.tagId||'')}" placeholder="QR/barcode, if any" autocapitalize="characters" autocorrect="off" spellcheck="false" style="text-transform:uppercase"/></label><label class="fld"><span class="lb">Weight (lb)</span><input id="f_weight" type="number" inputmode="decimal" value="${esc(u.weightLbs||'')}"/></label></div>
     <div class="grid2"><label class="fld"><span class="lb">Make</span><input id="f_make" value="${esc(u.make||'')}" placeholder="Cat, Cummins"/></label><label class="fld"><span class="lb">Model</span><input id="f_model" value="${esc(u.model||'')}" placeholder="XQ125"/></label></div>
     <div class="grid2"><label class="fld"><span class="lb">Rating (kVA)</span><input id="f_kw" type="number" inputmode="decimal" value="${esc(u.kw||'')}"/></label><label class="fld"><span class="lb">Breaker</span><input id="f_breaker" value="${esc(u.breakerSize||'')}" placeholder="400A"/></label></div>
-    <div id="bigFields" style="display:${u.klass==='big'?'block':'none'}"><div class="grid2"><label class="fld"><span class="lb">Config</span><select id="f_config"><option value="">—</option>${['Single 300kW','Single 500kW','TwinPak','Double 500kW'].map(c=>`<option ${u.config===c?'selected':''}>${c}</option>`).join('')}</select></label><label class="fld"><span class="lb">Trailer #</span><input id="f_trailer" value="${esc(u.trailer||'')}"/></label></div></div>
+    <div id="bigFields" style="display:${u.klass==='big'?'block':'none'}"><div class="grid2"><label class="fld"><span class="lb">Config</span><select id="f_config"><option value="">—</option>${['Single 300kW','Single 500kW','TwinPak','Double 500kW'].map(c=>`<option ${u.config===c?'selected':''}>${c}</option>`).join('')}</select></label><label class="fld"><span class="lb">Trailer #</span><input id="f_trailer" value="${esc(u.trailer||'')}"/></label></div>
+      <label class="fld"><span class="lb">True TwinPak — two engines, one housing, one serial</span><div class="segwrap" id="tp_seg"><button type="button" data-v="no" class="${!isTwin(u)?'on':''}" style="${!isTwin(u)?'background:var(--accent);color:#fff':''}" onclick="tpseg(this)">One engine</button><button type="button" data-v="yes" class="${isTwin(u)?'on':''}" style="${isTwin(u)?'background:var(--accent);color:#fff':''}" onclick="tpseg(this)">TwinPak</button></div></label>
+      <p class="muted" style="font-size:11px;margin:-4px 0 10px">Only for machines permanently paired in one housing — one NES line item. Generators that can be swapped off a shared chassis each get their own record.</p>
+      <div id="twinFields" style="display:${isTwin(u)?'block':'none'}">
+        <label class="fld"><span class="lb">How is the housing labelled?</span><div class="segwrap" id="ls_seg"><button type="button" data-v="AB" class="${engStyle(u)==='AB'?'on':''}" style="${engStyle(u)==='AB'?'background:var(--accent);color:#fff':''}" onclick="lsseg(this)">Gen A / Gen B</button><button type="button" data-v="12" class="${engStyle(u)==='12'?'on':''}" style="${engStyle(u)==='12'?'background:var(--accent);color:#fff':''}" onclick="lsseg(this)">Gen 1 / Gen 2</button></div></label>
+        <div class="grid2"><label class="fld"><span class="lb">Engine 1 nameplate kVA <b style="color:var(--red)">*</b></span><input id="f_kvaA" type="number" inputmode="decimal" value="${esc(engMeta(u,'A').kvaEach!=null?engMeta(u,'A').kvaEach:'')}" placeholder="off the nameplate"/></label><label class="fld"><span class="lb">Engine 2 nameplate kVA <b style="color:var(--red)">*</b></span><input id="f_kvaB" type="number" inputmode="decimal" value="${esc(engMeta(u,'B').kvaEach!=null?engMeta(u,'B').kvaEach:'')}" placeholder="off the nameplate"/></label></div>
+        <p class="muted" style="font-size:11px;margin:-4px 0 10px">Read both nameplates. Do not halve the package rating — paralleling gear and a shared bus derate it, so half the package appears on no nameplate.</p>
+        <div class="grid2"><label class="fld"><span class="lb">Engine 1 meter now</span><input id="f_hrsA" type="number" inputmode="decimal" value="" placeholder="read the meter"/></label><label class="fld"><span class="lb">Engine 2 meter now</span><input id="f_hrsB" type="number" inputmode="decimal" value="" placeholder="read the meter"/></label></div>
+        <p class="muted" style="font-size:11px;margin:-4px 0 12px">Each meter reading is logged as an intake check, stamped with your name and time — not written into a field. Existing history stays with Engine 1, labelled pre-split.</p>
+      </div></div>
     <div class="grid2"><label class="fld"><span class="lb">Fuel type</span><input id="f_fuel" value="${esc(u.fuelType||'Diesel')}"/></label><label class="fld"><span class="lb">Tank (gal)</span><input id="f_tank" type="number" inputmode="decimal" value="${esc(u.tankGallons||'')}"/></label></div>
-    <hr class="sep"/><div class="grid2"><label class="fld"><span class="lb">Current hrs</span><input id="f_hours" type="number" inputmode="decimal" value="${esc(u.currentHours!=null?u.currentHours:'')}"/></label><label class="fld"><span class="lb">Service due at (hrs)</span><input id="f_svc" type="number" inputmode="decimal" value="${esc(u.serviceDueHours!=null?u.serviceDueHours:'')}" placeholder="from sticker"/></label></div>
+    <hr class="sep"/><div class="grid2" id="flatHours" style="display:${isTwin(u)?'none':'grid'}"><label class="fld"><span class="lb">Current hrs</span><input id="f_hours" type="number" inputmode="decimal" value="${esc(u.currentHours!=null?u.currentHours:'')}"/></label><label class="fld"><span class="lb">Service due at (hrs)</span><input id="f_svc" type="number" inputmode="decimal" value="${esc(u.serviceDueHours!=null?u.serviceDueHours:'')}" placeholder="from sticker"/></label></div>
     <label class="fld"><span class="lb">Placement (this job)</span><input id="f_area" value="${esc(id?(jm(u,(u.locationType==='show'&&u.locationId)?u.locationId:S.currentShowId).area||''):'')}" placeholder="e.g. VIP South, Production"/></label>
     ${isNew?`<label class="fld"><span class="lb">Location</span><select id="f_loc">${locOpts}</select></label>`:''}
     <div class="card" style="padding:12px;margin:2px 0 10px"><div class="between"><span class="lb">Location pin (GPS)</span><span id="f_gpsStatus" class="muted" style="font-size:12px">${gpsStat}</span></div><button type="button" class="btn dark block" style="margin-top:9px" onclick="setFormGps()">📍 Set to my current location</button><p class="muted" style="font-size:11px;margin-top:7px">Drops a pin where you're standing. You can fine-tune it later on the map.</p></div>
     <label class="fld"><span class="lb">Notes</span><textarea id="f_notes">${esc(u.notes||'')}</textarea></label>
     <button class="btn primary block" onclick="saveUnit('${id||''}')">${isNew?'Add asset':'Save'}</button>${!isNew?`<button class="btn ghost block" style="margin-top:9px" onclick="confirmDeleteUnit('${id}')">Delete unit</button>`:''}`,stopScanner);
-  segType=u.klass==='big'?'big':'small';}
+  segType=u.klass==='big'?'big':'small';segTwin=isTwin(u);segStyle=engStyle(u);}
 function tseg(b){segType=b.dataset.v;document.querySelectorAll('#t_seg button').forEach(x=>{x.classList.remove('on');x.style.background='';x.style.color='';});b.classList.add('on');b.style.background='var(--accent)';b.style.color='#fff';const bf=$('#bigFields');if(bf)bf.style.display=segType==='big'?'block':'none';}
+function tpseg(b){segTwin=b.dataset.v==='yes';document.querySelectorAll('#tp_seg button').forEach(x=>{x.classList.remove('on');x.style.background='';x.style.color='';});b.classList.add('on');b.style.background='var(--accent)';b.style.color='#fff';const tf=$('#twinFields');if(tf)tf.style.display=segTwin?'block':'none';const fh=$('#flatHours');if(fh)fh.style.display=segTwin?'none':'grid';}
+function lsseg(b){segStyle=b.dataset.v==='12'?'12':'AB';document.querySelectorAll('#ls_seg button').forEach(x=>{x.classList.remove('on');x.style.background='';x.style.color='';});b.classList.add('on');b.style.background='var(--accent)';b.style.color='#fff';}
 function saveUnit(id){let ser=$('#f_serial').value.trim().toUpperCase();let tag=$('#f_tag').value.trim().toUpperCase();if(!ser&&!tag){ser='GEN-'+now().toString(36).slice(-5).toUpperCase();}const norm=x=>String(x||'').trim().toLowerCase();const clash=S.units.find(u=>{if(u.id===id)return false;const us=norm(u.serial),ut=norm(u.tagId);return (ser&&(us===norm(ser)||ut===norm(ser)))||(tag&&(us===norm(tag)||ut===norm(tag)));});if(clash){toast('That serial/code is already in the fleet — search for it to move it onto this job.');return;}
+  if(segType==='big'&&segTwin){const _ka=$('#f_kvaA')?num($('#f_kvaA').value):null,_kb=$('#f_kvaB')?num($('#f_kvaB').value):null;
+    if(!(_ka>0)||!(_kb>0)){toast("Read both nameplates — each engine's kVA is required to split a TwinPak.");return;}}
   requireTech(()=>{let u=id?unitById(id):null;const isNew=!u;if(isNew){u={id:uid('gen'),createdAt:now(),opStatus:'staged'};S.units.push(u);}
     u.serial=ser;u.tagId=tag;u.klass=segType;u.weightLbs=num($('#f_weight').value);u.make=$('#f_make').value.trim();u.model=$('#f_model').value.trim();u.kw=num($('#f_kw').value);u.breakerSize=$('#f_breaker').value.trim();
     if(segType==='big'){u.config=$('#f_config')?$('#f_config').value:'';u.trailer=$('#f_trailer')?$('#f_trailer').value.trim():'';}
+    /* TwinPak conversion. kvaEach is the one required field in the app — a
+       deliberate exception, because this is a low-frequency setup flow done while
+       standing at the machine, and a load % divided by a number nobody read is the
+       same failure as the merged hours we are removing. Per-engine targets already
+       set are preserved. */
+    if(segType==='big'&&segTwin){
+      const ka=num($('#f_kvaA').value),kb=num($('#f_kvaB').value);
+      const prev=(u.engines&&typeof u.engines==='object'&&!Array.isArray(u.engines))?u.engines:{};
+      const build=e=>{const m=(prev[e]&&typeof prev[e]==='object')?prev[e]:{};const o={kvaEach:(e==='A'?ka:kb)};
+        if(m.serviceDueHours!=null)o.serviceDueHours=m.serviceDueHours;
+        if(m.lastServiceHours!=null)o.lastServiceHours=m.lastServiceHours;
+        if(m.opStatus)o.opStatus=m.opStatus;return o;};
+      u.engines={style:segStyle,A:build('A'),B:build('B')};
+      /* Intake meter readings are OBSERVATIONS: they become engine-tagged checks,
+         stamped with who and when — never column writes. Blank fields create nothing,
+         so re-saving a converted unit does not manufacture duplicate readings. */
+      ENG.forEach(e=>{const el=$('#f_hrs'+e);const v=el?num(el.value):null;if(v==null)return;
+        S.reports.push({id:uid('rpt'),unitId:u.id,showId:S.currentShowId,techName:S.settings.techName,timestamp:now(),gps:null,engine:e,engineHours:v,notes:'Intake reading at TwinPak split',voltageLL:null,voltageLN:null,ampsL1:null,ampsL2:null,ampsL3:null,hz:null,loadKw:null,loadPct:null,coolantTemp:null,oilPressure:null,fuelLevelPct:null,batteryV:null,defPct:null});});
+    } else if(u.engines){u.engines=null;}
     u.fuelType=$('#f_fuel').value.trim();u.tankGallons=num($('#f_tank').value);u.currentHours=num($('#f_hours').value);u.serviceDueHours=num($('#f_svc').value);const _psid=(u.locationType==='show'&&u.locationId)?u.locationId:S.currentShowId;if(_psid){u.jobMeta=u.jobMeta||{};u.jobMeta[_psid]=Object.assign({},u.jobMeta[_psid],{area:$('#f_area').value.trim()});}u.notes=$('#f_notes').value.trim();u.updatedAt=now();
     if(isNew){const lv=($('#f_loc')&&$('#f_loc').value)||('show:'+(S.currentShowId||''));const[lt,lid]=lv.split(':');u.locationType=lt;u.locationId=lid;const _push=g=>{S.movements.push({id:uid('mv'),unitId:u.id,fromType:null,fromId:null,toType:lt,toId:lid,techName:S.settings.techName,timestamp:now(),gps:g||null});save();closeSheet();openUnit(u.id);toast(g?'Added · location pinned':'Added — no pin yet (set location later)');};if(formGps)_push(formGps);else captureGPS(_push);}
     else{if(formGps){S.movements.push({id:uid('mv'),unitId:u.id,fromType:u.locationType,fromId:u.locationId,toType:u.locationType,toId:u.locationId,techName:S.settings.techName,timestamp:now(),gps:formGps});}save();closeSheet();openUnit(u.id);toast(formGps?'Saved · location pinned':'Saved');}});}
