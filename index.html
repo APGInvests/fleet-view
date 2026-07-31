@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-30 twinpak-toggle-safe -->
+<!-- fleetview build 2026-07-30 twinpak-progress -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -415,6 +415,15 @@ function chassisStatus(u){
 function downEngines(u){return isTwin(u)?ENG.filter(e=>engStatus(u,e)==='down'):[];}
 function engLastTs(u,e){const r=engReports(u,e)[0];return r?r.timestamp:null;}
 function engStale(u,e){if(engStatus(u,e)==='down')return false;const t=engLastTs(u,e);const h=(S.settings.staleHours||6)*3600e3;return !t||(now()-t)>h;}
+/* Has this engine ever had hours read off ITS OWN meter? Inherited pre-split hours
+   do NOT count: a deterministic assignment of old merged history makes it
+   consistent, not correct. Until each engine has its own observed reading, its
+   countdown is running against a number nobody attributed to it — the same freeze
+   failure the prefill used to cause. Surfaced on the unit card so an incomplete
+   binding pass is visible from the Fleet list without opening anything. */
+function engNeedsReading(u,e){if(!isTwin(u)||!e)return false;
+  return !S.reports.some(r=>r.unitId===u.id&&r.engine===e&&r.engineHours!=null);}
+function twinGaps(u){return isTwin(u)?ENG.filter(e=>engNeedsReading(u,e)):[];}
 /* ===== STATUS ===== */
 function svcCalc(due,cur){if(due==null||cur==null)return{state:'unknown',remaining:null};const rem=Math.round((due-cur)*10)/10;if(rem<=0)return{state:'over',remaining:rem};if(rem<=(S.settings.warnHours||20))return{state:'soon',remaining:rem};return{state:'ok',remaining:rem};}
 function engServiceState(u,e){if(!isTwin(u)||!e)return svcCalc(u?u.serviceDueHours:null,u?u.currentHours:null);const m=engMeta(u,e);return svcCalc(m.serviceDueHours,engHours(u,e));}
@@ -489,7 +498,7 @@ function unitCard(u,sid){
     <div class="l1"><span class="tag">${esc(title)}</span>${statusPill(cs)}</div>
     <div style="font-size:12px;color:var(--ink2);margin-top:1px">${esc(subtitle||'—')}</div>
     ${line2}${fuelBar(u)}
-    <div class="metaline">${np?'<span class="chip">📷 '+np+'</span>':''}<span class="fresh ${stale?'stale':''}">${stale?IC.warn:''}⏱ ${fmtAgo(lastCheckTs(u))}${lastReport(u.id)?(' · '+esc(lastReport(u.id).techName||'')):''}</span></div>
+    <div class="metaline">${isTwin(u)?('<span class="chip">TWINPAK · '+esc(engName(u,'A').replace('Gen ',''))+'/'+esc(engName(u,'B').replace('Gen ',''))+'</span>'):''}${twinGaps(u).map(e=>'<span class="chip warn">'+esc(engName(u,e))+' needs a meter reading</span>').join('')}${np?'<span class="chip">📷 '+np+'</span>':''}<span class="fresh ${stale?'stale':''}">${stale?IC.warn:''}⏱ ${fmtAgo(lastCheckTs(u))}${lastReport(u.id)?(' · '+esc(lastReport(u.id).techName||'')):''}</span></div>
   </div></div></div>`;
 }
 /* ===== SWIPE-TO-REVEAL (job asset cards) ===== */
