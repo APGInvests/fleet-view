@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-08-01 reconnect -->
+<!-- fleetview build 2026-08-01 satellite-map -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -170,6 +170,16 @@
   #reader{width:100%;border-radius:12px;overflow:hidden;background:#000;min-height:250px}
   .qrbox{display:grid;place-items:center;padding:14px;background:#fff;border-radius:12px}
   #map{height:62vh;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:var(--surface2);isolation:isolate}
+  /* Map elements must read on BOTH street and aerial imagery — one style that works
+     everywhere, not two that each work once. Plugin-default cluster bubbles are
+     translucent (inherit the imagery); these overrides make them opaque charcoal
+     with white mono counts and a light outer ring. Spiderfy legs are white with a
+     dark SVG halo; the venue-picker circle gets the same halo. */
+  .marker-cluster-small,.marker-cluster-medium,.marker-cluster-large{background:rgba(255,255,255,.8)}
+  .marker-cluster-small div,.marker-cluster-medium div,.marker-cluster-large div{background:rgba(25,23,20,.92);color:#fff;font-family:var(--mono);font-weight:700}
+  .spiderleg{filter:drop-shadow(0 0 1.5px rgba(0,0,0,.9))}
+  .vmark{filter:drop-shadow(0 0 2px rgba(0,0,0,.8))}
+  .leaflet-control-layers label{color:#241d15;font-family:var(--mono);font-size:12px}
   .jobrow{cursor:pointer;padding:15px;margin-bottom:11px}
   .jobrow .jt{font-family:var(--serif);font-size:21px;font-weight:700}
   .jobrow .jsub{font-family:var(--mono);font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
@@ -821,6 +831,25 @@ function rerenderFleet(){const v=$('#view');const sc=v.querySelector('.searchbar
 /* ===== MAP ===== */
 let mapObj=null,mapScope='job',mapFocusUnit=null;
 function statusHex(c){return {green:'#2fa96a',orange:'#e2823f',red:'#dc5142',yellow:'#e0b23f',grey:'#8a8175',blue:'#2f7bde'}[c]||'#c77455';}
+/* ===== BASEMAP (street + satellite) =====
+   One constructor for every map in the app. Layers, per-layer attribution (the
+   control shows only the ACTIVE layer's credit), the USGS maxNativeZoom ceiling,
+   and the persistence hook all live here — three duplicated tile configs used to.
+   Preference is per-device in S.settings.basemap (same pattern as theme): read at
+   init, applied to every instance, flipped by baselayerchange, saved by save().
+   USGS Imagery Only is public domain, keyless — settled choice. Empirical cache
+   ceiling z16 (probed 2026-08-01 over Grant Park + Hinterland: hard 404 above);
+   maxNativeZoom upscales the last real tile instead of blanking. Street keeps 19. */
+function basemapPref(){return (S.settings&&S.settings.basemap==='satellite')?'satellite':'street';}
+function makeMap(el,opts){const m=L.map(el,Object.assign({attributionControl:true},opts||{}));
+  const street=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; OpenStreetMap contributors'});
+  const sat=L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,maxNativeZoom:16,attribution:'U.S. Geological Survey'});
+  (basemapPref()==='satellite'?sat:street).addTo(m);
+  const ctl=(L.control&&L.control.layers)?L.control.layers({'Street':street,'Satellite':sat}):null;
+  if(ctl)ctl.addTo(m);
+  m.on('baselayerchange',e=>{S.settings.basemap=(e&&e.name==='Satellite')?'satellite':'street';save();});
+  if(m.attributionControl&&m.attributionControl.setPrefix)m.attributionControl.setPrefix(false);
+  return m;}
 function renderMapScreen(){const s=currentShow();const toggle=s?`<div class="filterbar" style="margin-bottom:12px"><button class="fchip ${mapScope==='job'?'on':''}" onclick="mapScope='job';render()">This job</button><button class="fchip ${mapScope==='all'?'on':''}" onclick="mapScope='all';render()">All locations</button></div>`:'';return `<div class="between"><h2 class="section" style="margin:0">Map</h2>${s&&mapScope==='job'?`<span class="muted" style="font-family:var(--mono);font-size:11px">${esc(s.name)}</span>`:''}</div>${toggle}<div id="map"></div><p class="muted" id="mapNote" style="font-size:12px;margin-top:8px"></p>`;}
 function showUnitOnMap(unitId){const u=unitById(unitId);if(!u)return;if(!unitGps(u)){toast('No map pin for this one yet');openUnit(unitId);return;}mapFocusUnit=unitId;if(u.locationType==='show'&&u.locationId){S.currentShowId=u.locationId;mapScope='job';}else{mapScope='all';}const ov=$('#overlay');if(ov)ov.classList.remove('on');go('map');}
 function drawMap(scopeShowId){const el=$('#map');if(!el)return;const note=$('#mapNote');let _focusM=null;
@@ -829,13 +858,12 @@ function drawMap(scopeShowId){const el=$('#map');if(!el)return;const note=$('#ma
   if(typeof L==='undefined'){el.innerHTML='<div class="empty" style="padding:40px"><p class="muted">Map library did not load.</p></div>';if(note)note.textContent='';return;}
   if(!units.length&&!site){el.innerHTML='<div class="empty" style="padding:40px"><div class="em">'+IC.pin+'</div><p class="muted">No location yet. Set a venue on the job (open the job, Edit), or add/scan units on site with location allowed. Each drops a pin.</p></div>';if(note)note.textContent='';return;}
   try{if(mapObj){mapObj.remove();mapObj=null;}
-    mapObj=L.map(el,{attributionControl:false});
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(mapObj);
+    mapObj=makeMap(el);
     const pts=[];
-    if(site){L.marker([site.lat,site.lng],{icon:L.divIcon({className:'',html:'<div style="width:20px;height:20px;border-radius:50%;background:#c77455;border:3px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.35)"></div>',iconSize:[20,20]})}).addTo(mapObj).bindPopup('<b>Venue</b>');pts.push([site.lat,site.lng]);}
-    const useCl=(typeof L.markerClusterGroup==='function');const layer=useCl?L.markerClusterGroup({maxClusterRadius:45,showCoverageOnHover:false,spiderfyDistanceMultiplier:1.6}):null;
+    if(site){L.marker([site.lat,site.lng],{icon:L.divIcon({className:'',html:'<div style="width:20px;height:20px;border-radius:50%;background:#c77455;border:3px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.55),0 2px 4px rgba(0,0,0,.4)"></div>',iconSize:[20,20]})}).addTo(mapObj).bindPopup('<b>Venue</b>');pts.push([site.lat,site.lng]);}
+    const useCl=(typeof L.markerClusterGroup==='function');const layer=useCl?L.markerClusterGroup({maxClusterRadius:45,showCoverageOnHover:false,spiderfyDistanceMultiplier:1.6,spiderLegPolylineOptions:{weight:2.5,color:'#fff',opacity:.95,className:'spiderleg'}}):null;
     units.forEach(u=>{const g=unitGps(u);const cc=statusHex(computeStatus(u).color);const sid=scopeShowId||((u.locationType==='show')?u.locationId:null);
-      const icon=L.divIcon({className:'',html:'<div style="width:16px;height:16px;border-radius:50%;background:'+cc+';border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.3)"></div>',iconSize:[16,16]});
+      const icon=L.divIcon({className:'',html:'<div style="width:16px;height:16px;border-radius:50%;background:'+cc+';border:2px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.55),0 2px 4px rgba(0,0,0,.4)"></div>',iconSize:[16,16]});
       const m=L.marker([g.lat,g.lng],{icon});if(mapFocusUnit&&u.id===mapFocusUnit)_focusM=m;
       const _jd=jm(u,sid);const _area=placeOf(u,sid)||_jd.name||'Unplaced';const _sub=[(u.model||u.make||''),(u.serial?('#'+u.serial):'')].filter(Boolean).join(' · ');
       m.bindPopup('<div style="min-width:174px;font-family:system-ui,sans-serif;color:#241d15">'
@@ -861,8 +889,8 @@ let pinMap=null,pinMarker=null,pinLL=null;
 function openPinEditor(unitId){const u=unitById(unitId);if(!u)return;const g=unitGps(u);pinLL=g?{lat:g.lat,lng:g.lng}:null;const site=(u.locationType==='show'&&showById(u.locationId)&&showById(u.locationId).site)?showById(u.locationId).site:null;const st=g?{lat:g.lat,lng:g.lng,z:17}:(site?{lat:site.lat,lng:site.lng,z:16}:{lat:39.5,lng:-98.35,z:4});
   sheet('Adjust pin',`<p class="muted" style="margin-top:0">Drag the pin, or tap the map, to set where this unit is. Saves as a new placement.</p><div id="pinmap" style="height:56vh;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--surface2)"></div><button class="btn primary block" style="margin-top:12px" onclick="savePin('${unitId}')">Save pin</button>`,()=>{if(pinMap){try{pinMap.remove();}catch(e){}pinMap=null;}});
   setTimeout(()=>initPinMap(st),140);}
-function initPinMap(st){const el=$('#pinmap');if(!el||typeof L==='undefined')return;if(pinMap){try{pinMap.remove();}catch(e){}pinMap=null;}pinMarker=null;pinMap=L.map(el,{attributionControl:false}).setView([st.lat,st.lng],st.z);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(pinMap);if(pinLL)setPin(pinLL.lat,pinLL.lng);pinMap.on('click',e=>setPin(e.latlng.lat,e.latlng.lng));setTimeout(()=>{try{pinMap.invalidateSize();}catch(e){}},250);}
-function setPin(lat,lng){if(!pinMap)return;const icon=L.divIcon({className:'',html:'<div style="width:18px;height:18px;border-radius:50%;background:#c77455;border:3px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.35)"></div>',iconSize:[18,18]});if(pinMarker){pinMarker.setLatLng([lat,lng]);}else{pinMarker=L.marker([lat,lng],{icon,draggable:true}).addTo(pinMap);pinMarker.on('dragend',()=>{const p=pinMarker.getLatLng();pinLL={lat:+p.lat.toFixed(6),lng:+p.lng.toFixed(6)};});}pinLL={lat:+(+lat).toFixed(6),lng:+(+lng).toFixed(6)};}
+function initPinMap(st){const el=$('#pinmap');if(!el||typeof L==='undefined')return;if(pinMap){try{pinMap.remove();}catch(e){}pinMap=null;}pinMarker=null;pinMap=makeMap(el).setView([st.lat,st.lng],st.z);if(pinLL)setPin(pinLL.lat,pinLL.lng);pinMap.on('click',e=>setPin(e.latlng.lat,e.latlng.lng));setTimeout(()=>{try{pinMap.invalidateSize();}catch(e){}},250);}
+function setPin(lat,lng){if(!pinMap)return;const icon=L.divIcon({className:'',html:'<div style="width:20px;height:20px;border-radius:50%;background:#c77455;border:3px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.6),0 2px 6px rgba(0,0,0,.5)"></div>',iconSize:[20,20]});if(pinMarker){pinMarker.setLatLng([lat,lng]);}else{pinMarker=L.marker([lat,lng],{icon,draggable:true}).addTo(pinMap);pinMarker.on('dragend',()=>{const p=pinMarker.getLatLng();pinLL={lat:+p.lat.toFixed(6),lng:+p.lng.toFixed(6)};});}pinLL={lat:+(+lat).toFixed(6),lng:+(+lng).toFixed(6)};}
 function savePin(unitId){if(!pinLL){toast('Tap the map to place the pin');return;}const u=unitById(unitId);if(!u)return;requireTech(()=>{S.movements.push({id:uid('mv'),unitId,fromType:u.locationType,fromId:u.locationId,toType:u.locationType,toId:u.locationId,techName:S.settings.techName,timestamp:now(),gps:{lat:pinLL.lat,lng:pinLL.lng,acc:0}});u.updatedAt=now();save();closeSheet();openUnit(unitId);toast('Pin saved');});}
 /* ===== ALERTS ===== */
 function renderAlerts(){const all=S.units;
@@ -1160,8 +1188,8 @@ function markServiced(unitId,eng){const u=unitById(unitId);const e=(eng&&isTwin(
 function doServiced(unitId,eng){const u=unitById(unitId);const e=(eng&&isTwin(u))?eng:null;const at=num($('#ms_at').value);if(e){u.engines=u.engines||{};u.engines[e]=Object.assign({},u.engines[e]||{},{lastServiceHours:at,serviceDueHours:(at||0)+(num($('#ms_int').value)||0)});}else{u.currentHours=at;u.lastServiceHours=at;u.serviceDueHours=(at||0)+(num($('#ms_int').value)||0);}u.updatedAt=now();save();closeSheet();openUnit(unitId);toast('Serviced ✓');}
 /* ===== SHOWS / SHOPS / MORE / SETTINGS ===== */
 let venueSite=null,venueMap=null,venueMarker=null;
-function initVenuePicker(){const el=$('#venuePicker');if(!el||typeof L==='undefined')return;if(venueMap){try{venueMap.remove();}catch(e){}venueMap=null;}venueMarker=null;const st=venueSite||{lat:39.5,lng:-98.35,zoom:4};venueMap=L.map(el,{attributionControl:false}).setView([st.lat,st.lng],venueSite?(venueSite.zoom||14):4);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(venueMap);if(venueSite)setVenueMarker(venueSite.lat,venueSite.lng);venueMap.on('click',e=>setVenueMarker(e.latlng.lat,e.latlng.lng));setTimeout(()=>{try{venueMap.invalidateSize();}catch(e){}},250);}
-function setVenueMarker(lat,lng){if(!venueMap)return;if(venueMarker)venueMarker.setLatLng([lat,lng]);else venueMarker=L.circleMarker([lat,lng],{radius:10,color:'#fff',weight:3,fillColor:'#c77455',fillOpacity:.95}).addTo(venueMap);const z=venueMap.getZoom();venueSite={lat:+(+lat).toFixed(6),lng:+(+lng).toFixed(6),zoom:z<12?15:z};const r=$('#venueReadout');if(r)r.textContent='✓ Venue set ('+venueSite.lat+', '+venueSite.lng+')';}
+function initVenuePicker(){const el=$('#venuePicker');if(!el||typeof L==='undefined')return;if(venueMap){try{venueMap.remove();}catch(e){}venueMap=null;}venueMarker=null;const st=venueSite||{lat:39.5,lng:-98.35,zoom:4};venueMap=makeMap(el).setView([st.lat,st.lng],venueSite?(venueSite.zoom||14):4);if(venueSite)setVenueMarker(venueSite.lat,venueSite.lng);venueMap.on('click',e=>setVenueMarker(e.latlng.lat,e.latlng.lng));setTimeout(()=>{try{venueMap.invalidateSize();}catch(e){}},250);}
+function setVenueMarker(lat,lng){if(!venueMap)return;if(venueMarker)venueMarker.setLatLng([lat,lng]);else venueMarker=L.circleMarker([lat,lng],{radius:10,color:'#fff',weight:3,fillColor:'#c77455',fillOpacity:.95,className:'vmark'}).addTo(venueMap);const z=venueMap.getZoom();venueSite={lat:+(+lat).toFixed(6),lng:+(+lng).toFixed(6),zoom:z<12?15:z};const r=$('#venueReadout');if(r)r.textContent='✓ Venue set ('+venueSite.lat+', '+venueSite.lng+')';}
 function venueUseGPS(){const r=$('#venueReadout');if(r)r.textContent='Locating…';captureGPS(g=>{if(!g){if(r)r.textContent='Location unavailable. Drop a pin or search instead.';return;}if(venueMap)venueMap.setView([g.lat,g.lng],16);setVenueMarker(g.lat,g.lng);});}
 function venueSearch(){const q=$('#sh_venueSearch')&&$('#sh_venueSearch').value.trim();if(!q)return;const r=$('#venueReadout');if(r)r.textContent='Searching…';try{fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(q)).then(x=>x.json()).then(a=>{if(a&&a.length){const lat=+a[0].lat,lng=+a[0].lon;if(venueMap)venueMap.setView([lat,lng],15);setVenueMarker(lat,lng);}else{if(r)r.textContent='No match. Drop a pin on the map instead.';}}).catch(()=>{if(r)r.textContent='Search unavailable here. Use My location or drop a pin.';});}catch(e){if(r)r.textContent='Search unavailable here. Use My location or drop a pin.';}}
 function editShow(id){const s=id?showById(id):{};venueSite=s.site?{lat:s.site.lat,lng:s.site.lng,zoom:s.site.zoom}:null;sheet(id?'Edit job':'New job',`<label class="fld"><span class="lb">Show / event name *</span><input id="sh_name" value="${esc(s.name||'')}" placeholder="Desert Sound Fest 2026"/></label><label class="fld"><span class="lb">Location</span><input id="sh_loc" value="${esc(s.location||'')}" placeholder="City, venue"/></label><label class="fld"><span class="lb">Start date</span><input id="sh_start" type="date" value="${esc(s.startDate||'')}"/></label><div class="lb" style="margin:4px 0 6px">Venue location (optional). Centers the map</div><div class="row" style="margin-bottom:8px"><input id="sh_venueSearch" placeholder="Search e.g. Wrigley Field"/><button type="button" class="btn dark" onclick="venueSearch()">Find</button></div><button type="button" class="btn ghost block" style="margin-bottom:8px" onclick="venueUseGPS()">📍 Use my current location</button><div id="venuePicker" style="height:200px;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--surface2)"></div><p class="muted" id="venueReadout" style="font-size:12px;margin:6px 0 12px">${venueSite?('✓ Venue set ('+venueSite.lat+', '+venueSite.lng+')'):'Tap the map to drop a pin, or search / use your location.'}</p><button class="btn primary block" onclick="saveShow('${id||''}')">${id?'Save':'Create job'}</button>`);setTimeout(initVenuePicker,160);}

@@ -12,7 +12,7 @@
    - Only the five CDN hosts below are cache-first. Backend requests must never be
      intercepted (auth/realtime/PostgREST all break on cached responses); tiles and
      geocoding pass straight through. */
-const VERSION = 'fv-sw-1';
+const VERSION = 'fv-sw-2';
 const KILL = false;
 const SHELL = VERSION + '-shell', CDN = VERSION + '-cdn';
 const CDN_HOSTS = ['unpkg.com', 'cdn.jsdelivr.net', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
@@ -50,6 +50,14 @@ self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+  /* TILE SERVERS NEVER ENTER THE SERVICE WORKER CACHE (HANDOFF §8 rule 13).
+     An unbounded tile cache on a phone invites storage-pressure eviction, and
+     eviction does not respect our priorities — it can take the IndexedDB write
+     queue with it. A grey map offline is acceptable; losing queued writes is not.
+     This trades a convenience for a real durability guarantee, deliberately.
+     Applies to USGS imagery AND the OSM street tiles. Do not add tile hosts to
+     CDN_HOSTS — that is guarded by assertions in tools/fv_inv_sw.js. */
+  if (url.hostname === 'basemap.nationalmap.gov' || url.hostname.endsWith('tile.openstreetmap.org')) return;
   if (req.mode === 'navigate') { e.respondWith(netFirst(req)); return; }
   if (CDN_HOSTS.includes(url.hostname)) { e.respondWith(cacheFirst(req)); return; }
   // everything else (backend, nominatim, OSM tiles): straight to network, untouched

@@ -24,6 +24,17 @@ module.exports = (app, t) => {
   t.excludes(src, 'supabase', 'SW never touches Supabase requests');
   t.includes(src, 'fetchWithTimeout', 'network-first has a timeout (offline fallback path)');
 
+  t.group('service worker: tile servers never enter the cache — guard the guard');
+  // The requirement is not "tiles are uncached today" (they fall through anyway);
+  // it is that a future contributor cannot quietly add tile hosts to the cache.
+  // Both assertions fail loudly if someone removes the guard or grows CDN_HOSTS.
+  t.includes(src, "url.hostname === 'basemap.nationalmap.gov'", 'explicit early return for USGS tiles present');
+  t.includes(src, "tile.openstreetmap.org", 'OSM tiles covered by the same guard');
+  t.includes(src, 'TILE SERVERS NEVER ENTER THE SERVICE WORKER CACHE', 'reasoning stated in the code, not just HANDOFF');
+  const cdnLine = (src.match(/CDN_HOSTS\s*=\s*\[[^\]]*\]/) || [''])[0];
+  t.excludes(cdnLine, 'nationalmap', 'CDN_HOSTS does not contain the USGS host');
+  t.excludes(cdnLine, 'openstreetmap', 'CDN_HOSTS does not contain OSM');
+
   t.group('service worker: app registration');
   t.includes(app.code, "serviceWorker.register('sw.js')", 'relative registration (sandbox-scopable)');
   t.includes(app.code, 'controllerchange', 'reload-on-takeover wired');
