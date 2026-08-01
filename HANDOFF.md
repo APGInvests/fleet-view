@@ -71,6 +71,7 @@ A `profiles` table also exists in the database (populated by a new-user trigger)
 2. `save()` writes UI settings to `localStorage` and calls `scheduleFlush()`.
 3. `scheduleFlush()` debounces **450 ms** → `flush()`.
 4. `flush()` diffs each `S` array against a snapshot (`SNAP`), upserts rows that changed, deletes rows that disappeared, then re-baselines **only the tables whose writes acked** — a failed table keeps its old SNAP (stays dirty), retries every 30s, and lights the ⚠ sync chip with an unsaved count (§8 rule 12).
+4b. `loadAll()` **merges** server state over pending local dirt — it never replaces it. Dirty rows survive reloads and stay queued; pending deletes stay deleted and still emit; `units` conflicts resolve by `updatedAt` LWW with **losers parked in `SYNC_LOST`** (chip shows "N overwritten"; status sheet offers Copy JSON / Dismiss). A failed SELECT keeps both local rows and old SNAP — a failed read must not launder dirt clean, same rule 12.
 5. A Realtime `postgres_changes` subscription calls `scheduleReload()`, debounced **800 ms** → `loadAll()` + `render()`, so other devices update without a refresh. It defers if a flush is in flight.
 6. `loadAll()` does `select('*')` on every table in `TABLES`.
 
