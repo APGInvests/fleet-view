@@ -170,6 +170,8 @@ Invariants live in `tools/fv_inv_bigiron.js` and run on every preflight.
 
 > This was a real production bug: the pin used to take the newest GPS from *any* attached record, so filing a status report from another state teleported the generator onto the reporter. See §8, rule 1.
 
+**Movements are a placement-EVENT log, not a transfer log** — `capturePlacement`, `mapSetLoc` and `savePin` all write rows where nothing moved. Events are **typed** via `movements.kind`: null = moves/placements/pin-sets; `'photo'` = a placement photo (how the unit sat on *this* job — gps null, born with its photo, job-scoped via `toId`, its own attributed act separate from the instant GPS capture). **A `kind:'photo'` row must never satisfy anything that means "the unit was observed here"** — not `unitGps`, not `recentDests`, not freshness/staleness. Same family as rule 1, and the exclusion is by **explicit `kind` guard, not the gps-null field shape** (coincidence standing in for a rule is the `config==='TwinPak'` trap, §7). Adversarial invariants in `tools/fv_inv_placementphotos.js` hand a photo event a GPS and a destination and require both ignored.
+
 ---
 
 ## 5. Information architecture as shipped
