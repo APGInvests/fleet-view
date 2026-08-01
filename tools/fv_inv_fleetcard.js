@@ -51,4 +51,27 @@ module.exports = async (app, t) => {
   t.includes(h3, 'needs a meter reading', 'binding-pass gap visible from the Fleet list (per HANDOFF §10 1b)');
   const singleCard = h3.split('S-SG')[1] || '';
   t.excludes(singleCard.slice(0, 400), 'TWINPAK', 'single-engine unit shows no chip');
+
+  t.group('fleet card: make filter chips, one tap narrows the list');
+  app.setState({ units: [
+    mkUnit({ id: 'u-c1', serial: 'S-C1', make: 'CAT' }), mkUnit({ id: 'u-c2', serial: 'S-C2', make: 'CAT' }),
+    mkUnit({ id: 'u-h1', serial: 'S-H1', make: 'HiPower' }),
+    mkUnit({ id: 'u-b1', serial: 'S-B1', make: '' }),      // empty string
+    mkUnit({ id: 'u-b2', serial: 'S-B2', make: null }),    // and null — same absence
+  ] });
+  app.live.fleetMake = 'all';
+  const bar = app.fn.fleetMakeBar();
+  t.includes(bar, 'CAT · 2', 'make chip carries its count');
+  t.includes(bar, 'HiPower · 1', 'every make present gets a chip');
+  t.includes(bar, 'No make · 2', "blank chip counts '' AND null together (coalesce, not null-check)");
+  app.fn.setFleetMake('CAT');
+  const hc = app.fn.renderFleet();
+  t.includes(hc, 'S-C1', 'CAT filter keeps CAT');
+  t.excludes(hc, 'S-H1', 'CAT filter drops HiPower');
+  app.fn.setFleetMake('(none)');
+  const hn = app.fn.renderFleet();
+  t.includes(hn, 'S-B1', 'no-make filter catches empty string');
+  t.includes(hn, 'S-B2', 'no-make filter catches null');
+  t.excludes(hn, 'S-C1', 'and drops everything with a make');
+  app.fn.setFleetMake('all');
 };

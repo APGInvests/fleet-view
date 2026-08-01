@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-08-01 fleet-twinchip -->
+<!-- fleetview build 2026-08-01 fleet-makes -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -657,11 +657,19 @@ function renderJobDetail(id){const s=showById(id);if(!s){jobView=null;return ren
 }
 function rerenderJob(id){const v=$('#view');const sc=v.querySelector('.searchbar input');const pos=sc?sc.selectionStart:null;v.innerHTML=renderJobDetail(id);const ni=v.querySelector('.searchbar input');if(ni){ni.focus();if(pos!=null)try{ni.setSelectionRange(pos,pos);}catch(e){}}}
 /* ===== FLEET (global registry) ===== */
-let fleetFilter='all',fleetSearch='';
+let fleetFilter='all',fleetSearch='',fleetMake='all';
 function setFleetFilter(f){fleetFilter=f;render();}
+function setFleetMake(m){fleetMake=m;render();}
+/* Make chips are derived from the data, counts included — one tap takes 153 to 32.
+   '' and null are the same absence (coalesce, don't null-check). */
+function fleetMakeBar(){const counts={};let none=0;S.units.forEach(u=>{const m=String(u.make||'').trim();if(m)counts[m]=(counts[m]||0)+1;else none++;});
+  const makes=Object.keys(counts).sort((a,b)=>counts[b]-counts[a]||a.localeCompare(b));if(!makes.length&&!none)return '';
+  const chip=(val,label)=>`<button class="fchip ${fleetMake===val?'on':''}" onclick="setFleetMake('${esc(val)}')">${esc(label)}</button>`;
+  return `<div class="filterbar">${chip('all','All makes')}${makes.map(m=>chip(m,m+' · '+counts[m])).join('')}${none?chip('(none)','No make · '+none):''}</div>`;}
 function whereIs(u){if(u.locationType==='transit')return 'En route → '+locName('show',u.inTransitToShowId);return locName(u.locationType,u.locationId);}
 function renderFleet(){let list=S.units.slice();
   if(fleetSearch){const q=fleetSearch.toLowerCase();list=list.filter(u=>[u.tagId,u.serial,u.make,u.model].some(x=>String(x||'').toLowerCase().includes(q)));}
+  if(fleetMake!=='all')list=list.filter(u=>{const m=String(u.make||'').trim();return fleetMake==='(none)'?!m:m===fleetMake;});
   list=list.filter(u=>passFilter(u,fleetFilter)).sort(byKva);
   const rows=list.map(u=>{const cs=computeStatus(u);return `<div class="swipe-wrap"><div class="swipe-maphint">🗺 Map</div><div class="swipe-actions"><button class="swipe-act del" onclick="event.stopPropagation();closeSwipe(this);confirmDeleteUnit('${u.id}')">Delete</button></div><div class="card swipe-card" style="padding:12px 14px;margin-bottom:0;cursor:pointer;border-left:5px solid ${SC[cs.color]}" onpointerdown="swStart(event,this)" onpointermove="swMove(event,this)" onpointerup="swEnd(event,this,'${u.id}')" onpointercancel="swCancel(this)">
     <div class="between"><div style="min-width:0"><div style="font-family:var(--serif);font-size:18px;font-weight:700">${esc(([u.make,u.model].map(x=>String(x||'').trim()).filter(Boolean).join(' ')||'GEN')+' · #'+(u.serial||u.tagId||'—'))}</div>
@@ -670,6 +678,7 @@ function renderFleet(){let list=S.units.slice();
     <p class="muted" style="margin:6px 0 12px;font-size:13px">Every asset the company owns, wherever it is.</p>
     <div class="searchbar">${IC.search}<input placeholder="Search all assets…" value="${esc(fleetSearch)}" oninput="fleetSearch=this.value;rerenderFleet()"/></div>
     ${filterBar(fleetFilter,'setFleetFilter')}
+    ${fleetMakeBar()}
     ${list.length?rows:`<div class="empty"><div class="em">${IC.fleet}</div><p class="muted">No assets yet. Open a job and scan units in, or add one.</p></div>`}
     <button class="btn ghost block" style="margin-top:6px" onclick="openScan('fleet')">+ Add asset</button>`;
 }
