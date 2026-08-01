@@ -15,6 +15,8 @@ module.exports = async (app, t) => {
   t.group('photos: lazy upload at flush');
   app.setState({ units: [{ id: 'u1', serial: 'A1', photos: [D], jobMeta: {} }] });
   app.SYNC_READY = true;
+  app.live.SNAP = {}; // a freshly captured photo is always DIRTY — the diff is captured
+                      // before upload, and the swap patches the captured row's photos
   app.supabaseCalls.length = 0;
   await app.fn.flush();
   const ups = app.supabaseCalls.filter((c) => c.table === 'units' && c.op === 'upsert');
@@ -51,6 +53,7 @@ module.exports = async (app, t) => {
     units: [{ id: 'u4', serial: 'A4', photos: [], jobMeta: {} }],
     issues: [{ id: 'i1', unitId: 'u4', severity: 'cosmetic', title: 'ding', photos: [D], timestamp: 1000, resolved: false }],
   });
+  app.live.SNAP = {};
   app.supabaseCalls.length = 0;
   await app.fn.flush();
   const iu = app.supabaseCalls.filter((c) => c.table === 'issues' && c.op === 'upsert');

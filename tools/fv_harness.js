@@ -301,7 +301,7 @@ const LIVE_BINDINGS = [
   'jobFilter', 'jobSearch', 'jobsSearch', 'mem', 'STORAGE_OK', 'IC',
   'TABLES', 'MAPS', 'DT', 'SC', 'NAV', 'KEY',
   'DEAD', 'KV', 'OFFLINE',
-  'SYNC_FAILS', 'SYNC_LOST',
+  'SYNC_FAILS', 'SYNC_LOST', 'DEAD',
 ];
 
 /* ------------------------------------------------------------------ *

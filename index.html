@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-08-01 merge-on-load -->
+<!-- fleetview build 2026-08-01 ack-flush -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -322,8 +322,9 @@ function mergeServerState(t,serverRows){
   for(const id in server){merged[id]=server[id];outSnap[id]=JSON.stringify(toRow(t,server[id]));}
   /* pending local delete: absent locally, present in old SNAP -> stays gone; the
      server serialization stays in SNAP so the diff still emits the delete */
-  if(SNAP[t])for(const id in SNAP[t]){if(!localById[id]&&server[id])delete merged[id];}
+  if(SNAP[t])for(const id in SNAP[t]){if(!localById[id]&&!isDead(t,id)&&server[id])delete merged[id];}
   S[t].forEach(o=>{
+    if(isDead(t,o.id))return;                                /* quarantined: server stands; payload lives in DEAD */
     const rs=JSON.stringify(toRow(t,o));const snapRs=SNAP[t]?SNAP[t][o.id]:undefined;
     if(snapRs===rs)return;                                   /* clean: server version stands */
     const sv=server[o.id];
@@ -345,35 +346,69 @@ function snapshotTable(t){SNAP[t]={};S[t].forEach(o=>{SNAP[t][o.id]=JSON.stringi
 let SYNC_FAILS={};
 let flushTimer=null,flushing=false;
 function scheduleFlush(){if(!SYNC_READY)return;clearTimeout(flushTimer);flushTimer=setTimeout(flush,450);}
-/* RULE (§8.12): A WRITE THAT FAILS IS NEVER MARKED AS SYNCED. Only tables whose
-   writes all acked re-baseline; a failed table keeps its old SNAP so the diff stays
-   dirty, retries every 30s, and lights the ⚠ chip the user can see. This is the
-   interim guard — the 2026-08-01 movements incident (missing column + warn-and-
-   snapshot = 14h of permanent invisible loss) is why it exists. The full fix
-   (per-row acks, mid-flight-race closure, poison quarantine) is the durable-diff
-   plan: docs/plans/2026-07-29-offline-write-path.md. */
-async function flush(){if(!SYNC_READY||flushing)return;flushing=true;const fails={};
-  try{await syncPendingPhotos();
-    for(const t of TABLES){const cur={};S[t].forEach(o=>{cur[o.id]=o;});
-      const ups=[];for(const id in cur){const rs=JSON.stringify(toRow(t,cur[id]));if(!SNAP[t]||SNAP[t][id]!==rs)ups.push(toRow(t,cur[id]));}
-      const dels=[];if(SNAP[t])for(const id in SNAP[t]){if(!(id in cur))dels.push(id);}
-      let ok=true;
-      if(ups.length){const {error}=await sb.from(t).upsert(ups);if(error){ok=false;fails[t]=(fails[t]||0)+ups.length;console.warn('upsert',t,error.message);}}
-      if(dels.length){const {error}=await sb.from(t).delete().in('id',dels);if(error){ok=false;fails[t]=(fails[t]||0)+dels.length;console.warn('del',t,error.message);}}
-      if(ok)snapshotTable(t);}
-  }catch(e){fails['(connection)']=(fails['(connection)']||0)+1;console.warn('flush',e);}
-  flushing=false;SYNC_FAILS=fails;updateSyncChip();
-  if(Object.keys(fails).length){clearTimeout(flushTimer);flushTimer=setTimeout(flush,30000);}}
-function updateSyncChip(){const el=$('#syncChip');if(!el)return;const ks=Object.keys(SYNC_FAILS);const lost=SYNC_LOST.length;
-  if(!ks.length&&!lost){el.style.display='none';return;}
-  const n=ks.filter(k=>k!=='(connection)').reduce((a,k)=>a+SYNC_FAILS[k],0);
-  const parts=[];if(ks.length)parts.push(n?(n+' unsaved'):'sync failed');if(lost)parts.push(lost+' overwritten');
+/* RULE (§8.12): A WRITE THAT FAILS IS NEVER MARKED AS SYNCED — full ack-correct
+   flush (plan 3.3). captureDiff() runs SYNCHRONOUSLY at entry and acks are written
+   per-row from the CAPTURED serialization, so an edit landing mid-flight can never
+   be absorbed as "synced" (the race the interim guard still had). Upserts run in
+   TABLES order and HALT on a retryable failure — children never outrun a failed
+   parent; deletes run in reverse order. Non-retryable rejections (RLS, missing
+   column — exactly the 2026-08-01 incident class) are isolated per-row and
+   QUARANTINED in DEAD: visible on the chip, recoverable by a human (Retry — the
+   rejection may be transient config, e.g. a column that arrives later — or Copy
+   JSON). Retryable failures stay dirty and retry every 30s. */
+const RETRYABLE=e=>{const m=String((e&&e.message)||e||'').toLowerCase();
+  return m.includes('fetch')||m.includes('network')||m.includes('timeout')||m.includes('load failed')||m.includes('econn')||String(e&&e.code)==='429'||/^5\d\d$/.test(String(e&&e.code||''));};
+let DEAD={};
+const deadKey=(t,id)=>t+':'+id;
+const isDead=(t,id)=>!!DEAD[deadKey(t,id)];
+function captureDiff(){const d={ups:{},dels:{}};for(const t of TABLES){d.ups[t]=[];d.dels[t]=[];const cur={};
+  S[t].forEach(o=>{cur[o.id]=1;if(isDead(t,o.id))return;const rs=JSON.stringify(toRow(t,o));
+    if(!SNAP[t]||SNAP[t][o.id]!==rs)d.ups[t].push({id:o.id,rs,row:toRow(t,o)});});
+  if(SNAP[t])for(const id in SNAP[t]){if(!cur[id]&&!isDead(t,id))d.dels[t].push(id);}}return d;}
+function dirtyCount(){const d=captureDiff();let n=0;TABLES.forEach(t=>{n+=d.ups[t].length+d.dels[t].length;});return n;}
+async function isolatePoison(t,ups){for(const u of ups){const {error}=await sb.from(t).upsert([u.row]);
+  if(!error){SNAP[t]=SNAP[t]||{};SNAP[t][u.id]=u.rs;}
+  else if(RETRYABLE(error))return true;
+  else DEAD[deadKey(t,u.id)]={table:t,op:'upsert',rowId:u.id,row:u.row,error:String(error.message||error),ts:now()};}
+  return false;}
+async function flush(){if(!SYNC_READY||flushing)return;flushing=true;let netFail=false;
+  try{const d=captureDiff();          /* TRULY at entry — before any await, or the
+       first microtask boundary reopens the mid-flight race */
+    await syncPendingPhotos(d);        /* swaps Storage URLs into S and patches the
+       captured rows' photos field only — concurrent edits stay dirty */
+    for(const t of TABLES){const ups=d.ups[t];if(!ups.length)continue;
+      const {error}=await sb.from(t).upsert(ups.map(u=>u.row));
+      if(!error){SNAP[t]=SNAP[t]||{};ups.forEach(u=>{SNAP[t][u.id]=u.rs;});}
+      else if(RETRYABLE(error)){netFail=true;console.warn('upsert',t,error.message);break;}
+      else if(await isolatePoison(t,ups)){netFail=true;break;}}
+    if(!netFail)for(const t of TABLES.slice().reverse()){const dels=d.dels[t];if(!dels.length)continue;
+      const {error}=await sb.from(t).delete().in('id',dels);
+      if(!error)dels.forEach(id=>{if(SNAP[t])delete SNAP[t][id];});
+      else if(RETRYABLE(error)){netFail=true;console.warn('del',t,error.message);break;}
+      else dels.forEach(id=>{DEAD[deadKey(t,id)]={table:t,op:'delete',rowId:id,snapRs:SNAP[t]&&SNAP[t][id],error:String(error.message||error),ts:now()};if(SNAP[t])delete SNAP[t][id];});}
+  }catch(e){netFail=true;console.warn('flush',e);}
+  flushing=false;
+  const pend=dirtyCount();SYNC_FAILS=netFail?{'(pending)':pend}:{};updateSyncChip();
+  if(netFail){clearTimeout(flushTimer);flushTimer=setTimeout(flush,30000);}
+  else if(pend)scheduleFlush();}
+function updateSyncChip(){const el=$('#syncChip');if(!el)return;
+  const failed=!!Object.keys(SYNC_FAILS).length;const pend=SYNC_FAILS['(pending)']||0;
+  const stuck=Object.keys(DEAD).length;const lost=SYNC_LOST.length;
+  if(!failed&&!stuck&&!lost){el.style.display='none';return;}
+  const parts=[];if(failed)parts.push(pend?(pend+' unsaved'):'sync failed');
+  if(stuck)parts.push(stuck+' stuck');if(lost)parts.push(lost+' overwritten');
   el.style.display='';el.textContent='⚠ '+parts.join(' · ');}
-function openSyncStatus(){const ks=Object.keys(SYNC_FAILS);const n=ks.filter(k=>k!=='(connection)').reduce((a,k)=>a+SYNC_FAILS[k],0);
-  sheet('Sync status',`<div class="card" style="padding:13px;margin-bottom:12px"><div class="kv"><div class="k">Unsaved</div><div>${ks.length?((n||'connection error')+' — retrying every 30s'):'0'}</div><div class="k">Overwritten</div><div>${SYNC_LOST.length}</div></div></div>${SYNC_LOST.length?`<h2 class="section sm">Overwritten while unsaved</h2><p class="muted" style="font-size:12px">Someone else saved a newer version before your change went through. Your entry is kept here — copy it out if it still matters, then re-enter what's current.</p>${SYNC_LOST.map((x,i)=>`<div class="card" style="padding:12px;margin-bottom:8px;border-left:5px solid var(--orange)"><div class="between"><b style="font-size:13px">#${esc(x.serial)}</b><span class="muted" style="font-size:11px">${fmtDate(x.ts)}</span></div><div class="muted" style="font-size:11.5px;margin-top:4px">${esc(String(x.row&&x.row.notes||''))}</div><div class="row" style="margin-top:8px"><button class="btn ghost sm wide" onclick="copyLost(${i})">Copy JSON</button><button class="btn ghost sm wide" onclick="dismissLost(${i})">Dismiss</button></div></div>`).join('')}`:''}<button class="btn primary block" onclick="retrySync();closeSheet()">Sync now</button>`);}
+function openSyncStatus(){const failed=!!Object.keys(SYNC_FAILS).length;const pend=SYNC_FAILS['(pending)']||0;const dk=Object.keys(DEAD);
+  const stuckRows=dk.map(k=>{const d=DEAD[k];const label=(d.row&&(d.row.serial||d.row.title))||d.rowId||d.table;
+    return `<div class="card" style="padding:12px;margin-bottom:8px;border-left:5px solid var(--red)"><div class="between"><b style="font-size:13px">${esc(d.table)} · ${esc(String(label))}</b><span class="muted" style="font-size:11px">${fmtDate(d.ts)}</span></div><div class="muted" style="font-size:11px;margin-top:3px">${esc(d.error)}</div><div class="row" style="margin-top:8px"><button class="btn dark sm wide" onclick="retryDead('${esc(k)}');closeSheet();toast('Retrying…')">Retry</button><button class="btn ghost sm wide" onclick="copyDead('${esc(k)}')">Copy JSON</button></div></div>`;}).join('');
+  sheet('Sync status',`<div class="card" style="padding:13px;margin-bottom:12px"><div class="kv"><div class="k">Unsaved</div><div>${failed?((pend||'connection error')+' — retrying every 30s'):'0'}</div><div class="k">Stuck</div><div>${dk.length}</div><div class="k">Overwritten</div><div>${SYNC_LOST.length}</div></div></div>${dk.length?`<h2 class="section sm">Stuck — the server refused these</h2><p class="muted" style="font-size:12px">Parked so they can't block anything else. Nothing is deleted. If the rejection was temporary (a setting or column that changed), <b>Retry</b> sends it again.</p>${stuckRows}`:''}${SYNC_LOST.length?`<h2 class="section sm">Overwritten while unsaved</h2><p class="muted" style="font-size:12px">Someone else saved a newer version before your change went through. Your entry is kept here — copy it out if it still matters, then re-enter what's current.</p>${SYNC_LOST.map((x,i)=>`<div class="card" style="padding:12px;margin-bottom:8px;border-left:5px solid var(--orange)"><div class="between"><b style="font-size:13px">#${esc(x.serial)}</b><span class="muted" style="font-size:11px">${fmtDate(x.ts)}</span></div><div class="muted" style="font-size:11.5px;margin-top:4px">${esc(String(x.row&&x.row.notes||''))}</div><div class="row" style="margin-top:8px"><button class="btn ghost sm wide" onclick="copyLost(${i})">Copy JSON</button><button class="btn ghost sm wide" onclick="dismissLost(${i})">Dismiss</button></div></div>`).join('')}`:''}<button class="btn primary block" onclick="retrySync();closeSheet()">Sync now</button>`);}
 function copyLost(i){try{navigator.clipboard.writeText(JSON.stringify(SYNC_LOST[i],null,2));}catch(e){}toast('Copied');}
 function dismissLost(i){SYNC_LOST.splice(i,1);updateSyncChip();openSyncStatus();}
 function retrySync(){toast('Retrying sync…');clearTimeout(flushTimer);flush();}
+function retryDead(k){const d=DEAD[k];if(!d)return;
+  if(d.op==='delete'&&d.snapRs){SNAP[d.table]=SNAP[d.table]||{};SNAP[d.table][d.rowId]=d.snapRs;}
+  delete DEAD[k];updateSyncChip();scheduleFlush();}
+function copyDead(k){try{navigator.clipboard.writeText(JSON.stringify(DEAD[k],null,2));}catch(e){}toast('Copied');}
 function subscribeRealtime(){try{realtimeCh=sb.channel('fleet_all');TABLES.forEach(t=>realtimeCh.on('postgres_changes',{event:'*',schema:'public',table:t},scheduleReload));realtimeCh.subscribe();}catch(e){console.warn('rt',e);}}
 let reloadTimer=null;
 function scheduleReload(){clearTimeout(reloadTimer);reloadTimer=setTimeout(async()=>{if(flushing){scheduleReload();return;}await loadAll();render();},800);}
@@ -881,12 +916,12 @@ const PHOTO_FLUSH_CAP=6,PHOTO_UPLOAD_MS=8000;
    debt, NOT a bug to rediscover): an upload that times out client-side but lands
    server-side anyway orphans a Storage object, and the retry uploads a duplicate
    under a fresh uid path. Rows only ever reference the copy that acked in time. */
-async function syncPendingPhotos(){const jobs=[];S.units.forEach(o=>{(o.photos||[]).forEach((p,i)=>{if(isDataURI(p))jobs.push({o,i,path:'units/'+o.id+'/'+now()+'-'+uid()+'.jpg'});});});S.issues.forEach(o=>{(o.photos||[]).forEach((p,i)=>{if(isDataURI(p))jobs.push({o,i,path:'issues/'+o.id+'/'+now()+'-'+uid()+'.jpg'});});});S.movements.forEach(o=>{(o.photos||[]).forEach((p,i)=>{if(isDataURI(p))jobs.push({o,i,path:'movements/'+o.id+'/'+now()+'-'+uid()+'.jpg'});});});
+async function syncPendingPhotos(d){const jobs=[];S.units.forEach(o=>{(o.photos||[]).forEach((p,i)=>{if(isDataURI(p))jobs.push({o,i,t:'units',path:'units/'+o.id+'/'+now()+'-'+uid()+'.jpg'});});});S.issues.forEach(o=>{(o.photos||[]).forEach((p,i)=>{if(isDataURI(p))jobs.push({o,i,t:'issues',path:'issues/'+o.id+'/'+now()+'-'+uid()+'.jpg'});});});S.movements.forEach(o=>{(o.photos||[]).forEach((p,i)=>{if(isDataURI(p))jobs.push({o,i,t:'movements',path:'movements/'+o.id+'/'+now()+'-'+uid()+'.jpg'});});});
   for(const j of jobs.slice(0,PHOTO_FLUSH_CAP)){const ctl=(typeof AbortController!=='undefined')?new AbortController():null;let tm=null;
     try{const up=sb.storage.from('unit-photos').upload(j.path,dataURItoBlob(j.o.photos[j.i]),{contentType:'image/jpeg',signal:ctl?ctl.signal:undefined});
       const {error}=await Promise.race([up,new Promise((_,rej)=>{tm=setTimeout(()=>{if(ctl)ctl.abort();rej(new Error('timeout'));},PHOTO_UPLOAD_MS);})]);
       clearTimeout(tm);if(error)continue;
-      const {data}=sb.storage.from('unit-photos').getPublicUrl(j.path);if(data&&data.publicUrl)j.o.photos[j.i]=data.publicUrl;}
+      const {data}=sb.storage.from('unit-photos').getPublicUrl(j.path);if(data&&data.publicUrl){j.o.photos[j.i]=data.publicUrl;if(d){const e=(d.ups[j.t]||[]).find(x=>x.id===j.o.id);if(e){e.row=Object.assign({},e.row,{photos:j.o.photos.slice()});e.rs=JSON.stringify(e.row);}}}}
     catch(e){clearTimeout(tm);}}}
 function bigPhoto(src){$('#photoBig').src=src;$('#photoOverlay').classList.add('on');}
 function photoStrip(items,vp,rp){return `<div class="photostrip">${items.map((p,i)=>`<div class="ph"><img src="${p}" onclick="${vp}${i})"/>${rp?`<button class="rm" onclick="${rp}${i})">✕</button>`:''}</div>`).join('')}</div>`;}
