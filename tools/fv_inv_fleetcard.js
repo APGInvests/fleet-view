@@ -30,4 +30,14 @@ module.exports = async (app, t) => {
   t.includes(h, 'Technogen · #S-EMPTY', "empty-string model treated as absent — no trailing space, no ''-vs-null split");
   t.includes(h, 'GEN · #S-NONE', 'neither -> GEN fallback');
   t.excludes(h, 'CAT  ·', 'no double-space artifacts');
+
+  t.group('fleet card: kVA renders on its own — no job placement required');
+  app.setState({ units: [
+    mkUnit({ id: 'u-rated', serial: 'S-R', kw: 625, locationType: 'fleet', locationId: null }),
+    mkUnit({ id: 'u-norating', serial: 'S-N', kw: null }),
+  ] });
+  const h2 = fleetHtml();
+  t.includes(h2, '625 kVA', 'unassigned unit still shows its size');
+  t.excludes(h2, 'null kVA', 'no rating -> no artifact');
+  t.excludes(h2, '>0 kVA', 'zero/blank never renders a fake rating');
 };
