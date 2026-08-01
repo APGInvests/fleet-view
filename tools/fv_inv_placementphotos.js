@@ -74,4 +74,23 @@ module.exports = async (app, t) => {
     'photo action is visually distinct (ghost), not a twin of the primary capture');
   app.fn.openJobLog('show-A');
   t.includes(app.document.querySelector('#sheet').innerHTML, '📷 Placement photo', 'job log labels it honestly');
+
+  t.group('condition photos: empty fleet-wide is EXPECTED, the path is not broken');
+  // 2026-08-01 reclassification (docs/photo-reclass.sql): owner confirmed no
+  // condition photos existed — every historical shot documented placement, so
+  // units.photos was emptied fleet-wide. Condition history starts from zero.
+  // If you're reading this because units.photos is empty everywhere: that is
+  // the correct state, not a bug. This group proves the capture path works.
+  app.setState({ units: [mkUnit({ id: 'u-cond', photos: [] })], shows: [{ id: 'show-A', name: 'A' }] });
+  app.fn.handleUnitPhoto({ files: [{ name: 'p.jpg' }], value: '' }, 'u-cond');
+  // the harness Image stub's onload fires on Node's real event loop (module-scope
+  // setTimeout), not the captured sandbox timers — await a tick, don't flushTimers
+  await new Promise((r) => setTimeout(r, 10));
+  const cu = app.S.units[0];
+  t.eq((cu.photos || []).length, 1, 'condition capture still lands on the unit');
+  t.ok(String(cu.photos[0]).slice(0, 5) === 'data:', 'as a data URI awaiting the Storage flush');
+  app.live.SNAP = {}; app.supabaseCalls.length = 0;
+  await app.fn.flush();
+  t.ok(app.supabaseCalls.some((c) => c.op === 'upload' && String(c.payload.path).indexOf('units/') === 0),
+    'and still uploads under units/ — asset-level, travels with the machine');
 };
