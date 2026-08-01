@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-08-01 fleet-kva -->
+<!-- fleetview build 2026-08-01 fleet-twinchip -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -665,7 +665,7 @@ function renderFleet(){let list=S.units.slice();
   list=list.filter(u=>passFilter(u,fleetFilter)).sort(byKva);
   const rows=list.map(u=>{const cs=computeStatus(u);return `<div class="swipe-wrap"><div class="swipe-maphint">🗺 Map</div><div class="swipe-actions"><button class="swipe-act del" onclick="event.stopPropagation();closeSwipe(this);confirmDeleteUnit('${u.id}')">Delete</button></div><div class="card swipe-card" style="padding:12px 14px;margin-bottom:0;cursor:pointer;border-left:5px solid ${SC[cs.color]}" onpointerdown="swStart(event,this)" onpointermove="swMove(event,this)" onpointerup="swEnd(event,this,'${u.id}')" onpointercancel="swCancel(this)">
     <div class="between"><div style="min-width:0"><div style="font-family:var(--serif);font-size:18px;font-weight:700">${esc(([u.make,u.model].map(x=>String(x||'').trim()).filter(Boolean).join(' ')||'GEN')+' · #'+(u.serial||u.tagId||'—'))}</div>
-    <div class="uloc" style="margin-top:3px">${IC.pin}<span>${esc(whereIs(u))}</span></div></div><div style="text-align:right;flex:0 0 auto">${statusPill(cs)}${u.kw?`<div style="font-family:var(--mono);font-size:12.5px;font-weight:700;margin-top:5px">${esc(u.kw)} kVA</div>`:''}</div></div></div></div>`;}).join('');
+    <div class="uloc" style="margin-top:3px">${IC.pin}<span>${esc(whereIs(u))}</span></div></div><div style="text-align:right;flex:0 0 auto">${statusPill(cs)}${u.kw?`<div style="font-family:var(--mono);font-size:12.5px;font-weight:700;margin-top:5px">${esc(u.kw)} kVA</div>`:''}</div></div>${isTwin(u)?`<div class="metaline">${'<span class="chip">TWINPAK'+(engStyle(u)?(' · '+(engStyle(u)==='12'?'1/2':'A/B')):'')+'</span>'}${twinGaps(u).map(e=>'<span class="chip warn">'+esc(engName(u,e))+' needs a meter reading</span>').join('')}</div>`:''}</div></div></div>`;}).join('');
   return `<div class="between"><h2 class="section" style="margin:0">Fleet</h2><span class="muted" style="font-family:var(--mono);font-size:12px">${S.units.length} assets</span></div>
     <p class="muted" style="margin:6px 0 12px;font-size:13px">Every asset the company owns, wherever it is.</p>
     <div class="searchbar">${IC.search}<input placeholder="Search all assets…" value="${esc(fleetSearch)}" oninput="fleetSearch=this.value;rerenderFleet()"/></div>

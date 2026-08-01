@@ -40,4 +40,15 @@ module.exports = async (app, t) => {
   t.includes(h2, '625 kVA', 'unassigned unit still shows its size');
   t.excludes(h2, 'null kVA', 'no rating -> no artifact');
   t.excludes(h2, '>0 kVA', 'zero/blank never renders a fake rating');
+
+  t.group('fleet card: TwinPak chip on the scanning surface');
+  app.setState({ units: [
+    mkUnit({ id: 'u-twin', serial: 'S-TW', engines: { style: '12', A: { kvaEach: 438 }, B: { kvaEach: 438 } } }),
+    mkUnit({ id: 'u-single', serial: 'S-SG' }),   // X5M case: single 500, correctly no chip
+  ] });
+  const h3 = fleetHtml();
+  t.includes(h3, 'TWINPAK · 1/2', 'twin shows the chip with its housing label style');
+  t.includes(h3, 'needs a meter reading', 'binding-pass gap visible from the Fleet list (per HANDOFF §10 1b)');
+  const singleCard = h3.split('S-SG')[1] || '';
+  t.excludes(singleCard.slice(0, 400), 'TWINPAK', 'single-engine unit shows no chip');
 };
