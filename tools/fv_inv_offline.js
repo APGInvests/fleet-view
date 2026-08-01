@@ -154,4 +154,23 @@ module.exports = async (app, t) => {
   t.ok(app.fn.dirtyCount() >= 1, 'the queued edit is STILL QUEUED after restart (rule 12 across restarts)');
   t.ok(app.live.DEAD['units:u-dead'], 'quarantine restored');
   t.eq(app.live.SYNC_LOST.length, 1, 'overwritten list restored');
+
+  t.group('reconnect: registered once, read-merge strictly before write');
+  app.setState({ units: [mkUnit({ id: 'u-net', updatedAt: 9000 })], shows: [{ id: 'show-A', name: 'A' }] });
+  app.SYNC_READY = true; app.live.DEAD = {}; app.live.SYNC_LOST = [];
+  app.S.units[0].notes = 'queued offline'; app.S.units[0].updatedAt = 9500;
+  app.opts.tableData = { units: [] };
+  app.fn.initNetTriggers();
+  app.fn.initNetTriggers();                                    // deliberate double call
+  t.eq((app.windowListeners['online'] || []).length, 1, 'online listener registered exactly once');
+  t.eq((app.windowListeners['doc:visibilitychange'] || []).length, 1, 'visibility listener registered exactly once');
+  app.supabaseCalls.length = 0;
+  app.timers.length = 0;
+  app.fireWindow('online');
+  await new Promise((r) => setTimeout(r, 5)); app.flushTimers(); await new Promise((r) => setTimeout(r, 5));
+  const firstSelect = app.supabaseCalls.findIndex((c) => c.op === 'select');
+  const firstUpsert = app.supabaseCalls.findIndex((c) => c.op === 'upsert');
+  t.ok(firstSelect !== -1 && firstUpsert !== -1, 'reconnect both reloads and flushes');
+  t.ok(firstSelect < firstUpsert, 'merge (read) strictly precedes flush (write) on reconnect');
+  app.opts.tableData = null;
 };

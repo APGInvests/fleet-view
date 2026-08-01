@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-08-01 durable-cache -->
+<!-- fleetview build 2026-08-01 reconnect -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -435,6 +435,19 @@ function copyDead(k){try{navigator.clipboard.writeText(JSON.stringify(DEAD[k],nu
 function subscribeRealtime(){try{realtimeCh=sb.channel('fleet_all');TABLES.forEach(t=>realtimeCh.on('postgres_changes',{event:'*',schema:'public',table:t},scheduleReload));realtimeCh.subscribe();}catch(e){console.warn('rt',e);}}
 let reloadTimer=null;
 function scheduleReload(){clearTimeout(reloadTimer);reloadTimer=setTimeout(async()=>{if(flushing){scheduleReload();return;}await loadAll();render();},800);}
+/* ===== RECONNECT TRIGGERS (plan 3.6) ===== */
+/* Order inside netBack is a load-bearing contract: MERGE (read) strictly before
+   FLUSH (write), so units LWW resolves client-side and a phone that slept through
+   a shift can't replay a stale row over the team's afternoon. Idempotent guard:
+   boot() can run more than once (sign-in paths call it directly) — without the
+   guard each sign-in stacks listeners and another uncleaned interval. */
+let netTriggersOn=false;
+function initNetTriggers(){if(netTriggersOn)return;netTriggersOn=true;try{
+  window.addEventListener('online',()=>{netBack();});
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(Object.keys(SYNC_FAILS).length||dirtyCount()))netBack();});
+  setInterval(()=>{if(SYNC_READY&&!flushing&&navigator.onLine!==false&&dirtyCount())scheduleFlush();},30000);
+}catch(e){}}
+async function netBack(){if(!SYNC_READY||flushing)return;await loadAll();render();scheduleFlush();}
 function showAuth(){const g=$('#authgate');if(g)g.style.display='flex';authMsg('');setAuthMode('signin');}
 function hideAuth(){const g=$('#authgate');if(g)g.style.display='none';}
 let authMode='signin';
@@ -447,7 +460,7 @@ async function doSignOut(){try{await KV.del('cache');}catch(e){}try{if(realtimeC
 async function boot(){authMsg('Loading…');const {data:{session}}=await sb.auth.getSession();if(!session){showAuth();return;}USER=session.user;const nm=(USER.user_metadata&&USER.user_metadata.name)||'';S.settings.techName=nm||(USER.email?USER.email.split('@')[0]:'Tech');hideAuth();
   const cached=await hydrateFromCache();TAB=(S.settings.homeTab==='fleet')?'fleet':'jobs';setActiveNav(TAB);
   if(cached){SYNC_READY=true;render();}          /* last-known data on screen immediately; loadAll merges over it */
-  await loadAll();SYNC_READY=true;subscribeRealtime();render();
+  await loadAll();SYNC_READY=true;subscribeRealtime();initNetTriggers();render();
   if(!cached&&!S.units.length&&!S.shows.length)toast('No connection — will sync when you have signal');
   if(!nm)setTimeout(promptName,500);}
 function promptName(){sheet('Your name',`<p class="muted" style="margin-top:0">This shows on everything you log. First name and last initial, like "Mike R.".</p><div class="grid2"><label class="fld"><span class="lb">First name</span><input id="pn_first"/></label><label class="fld"><span class="lb">Last name</span><input id="pn_last"/></label></div><button class="btn primary block" onclick="saveName()">Save</button>`);}
