@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-31 range-flags -->
+<!-- fleetview build 2026-08-01 oil-floor -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -368,9 +368,9 @@ function nearMatches(code,cap){const q=nrmCode(code);if(!q)return[];const out=[]
    miss can never flag the wrong machine with the wrong range. Ranges are plate facts
    and change at plate-reading cadence, i.e. a commit, not a UI. Flags only COMMENT on
    a number the tech already typed (rule 2): never prefill, propose, block or recolor.
-   Oil has two floors (idle 15 / running 40) with a shared ceiling: readings in the
-   15-40 band are flagged only when Load kW shows the machine under real load (>=30%);
-   with load unknown the app stays silent — honest beats guessy. No flags at all
+   Oil's floor is 40; 15 is the IDLE EXCEPTION, not the rule. Below 40 while Running
+   always flags — load evidence only softens the wording (may-be-idling under 30%
+   load) — because a safety flag must not go quiet when a field was skipped. No flags at all
    unless the status selector reads Running: 0 psi on a stopped engine is a true
    reading, not an emergency. */
 const SPEC_RANGES={CATXQ500:{fuelPsi:{lo:75,hi:122},oilRun:{lo:40,hi:87},oilIdle:{lo:15,hi:87}}};
@@ -386,7 +386,13 @@ function rangeFlags(){const el=$('#v_rangeFlags');if(!el)return;const u=unitById
     else if(op<sp.oilIdle.lo)msgs.push('Oil '+op+' psi — below the '+name+' floor even at idle ('+sp.oilIdle.lo+').');
     else if(op<sp.oilRun.lo){const kwEl=$('#v_kw');const kw=kwEl?num(kwEl.value):null;
       const pct=(kw!=null&&lvRatingKva)?Math.round(kw/(lvRatingKva*0.8)*100):null;
-      if(pct!=null&&pct>=30)msgs.push('Oil '+op+' psi — below the '+name+' running floor ('+sp.oilRun.lo+') at '+pct+'% load.');}}
+      /* 40 is THE floor; 15 is the idle exception. Below 40 while Running always
+         flags — load evidence only changes the wording. A false flag at idle costs
+         two seconds; a missed flag under load costs an engine. The app must not be
+         quietest when it was given the least information. */
+      if(pct!=null&&pct>=30)msgs.push('Oil '+op+' psi — below the '+name+' running floor ('+sp.oilRun.lo+') at '+pct+'% load.');
+      else if(pct!=null)msgs.push('Oil '+op+' psi — below the '+name+' running floor ('+sp.oilRun.lo+'). At '+pct+'% load it may just be idling — idle floor is '+sp.oilIdle.lo+'.');
+      else msgs.push('Oil '+op+' psi — below the '+name+' running floor ('+sp.oilRun.lo+'). If it’s idling, the idle floor is '+sp.oilIdle.lo+'.');}}
   const fpEl=$('#v_fp');const fp=fpEl?num(fpEl.value):null;
   if(fp!=null){
     if(fp<sp.fuelPsi.lo)msgs.push('Fuel '+fp+' psi — below the '+name+' range ('+sp.fuelPsi.lo+'–'+sp.fuelPsi.hi+'). Plate: if racors don’t correct it, change spin-ons.');

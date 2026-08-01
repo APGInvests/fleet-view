@@ -37,14 +37,18 @@ module.exports = async (app, t) => {
   $v('#v_fp', '101'); t.eq(flags(), '', 'nominal 101 is silent');
   $v('#v_fp', '130'); t.includes(flags(), 'above the CAT XQ-500 range', '130 flags above');
 
-  t.group('range flags: oil dual floors, shared ceiling, load-gated band');
+  t.group('range flags: oil — 40 is the floor, 15 is the idle exception, bias to flagging');
+  // A false flag at idle costs two seconds of "that's fine"; a missed flag under
+  // load costs an engine. Below 40 while Running ALWAYS flags — load evidence only
+  // changes the wording. The app must never be quietest when it knows least.
   openForm('u-a');
-  $v('#v_op', '12');  t.includes(flags(), 'below the CAT XQ-500 floor even at idle (15)', '<15 always flags');
+  $v('#v_op', '12');  t.includes(flags(), 'below the CAT XQ-500 floor even at idle (15)', '<15 always flags, strongest wording');
   $v('#v_op', '95');  t.includes(flags(), 'above the CAT XQ-500 ceiling (87)', '>87 always flags');
-  $v('#v_op', '55');  t.eq(flags(), '', '40–87 never flags');
-  $v('#v_op', '30');  t.eq(flags(), '', '15–40 with load UNKNOWN stays silent — no guessing');
-  $v('#v_kw', '50');  t.eq(flags(), '', '15–40 at 10% load stays silent (not under real load)');
-  $v('#v_kw', '250'); t.includes(flags(), 'below the CAT XQ-500 running floor (40) at 50% load', '15–40 under load flags with the load named');
+  $v('#v_op', '55');  t.eq(flags(), '', '40–87 stays silent');
+  $v('#v_op', '30');  t.includes(flags(), 'below the CAT XQ-500 running floor (40)', '15–40 with load UNKNOWN flags — silence is not the reward for a skipped field');
+  t.includes(flags(), 'idle floor is 15', 'and names the idle exception');
+  $v('#v_kw', '50');  t.includes(flags(), 'may just be idling', '15–40 at 10% load still flags, wording softened');
+  $v('#v_kw', '250'); t.includes(flags(), 'below the CAT XQ-500 running floor (40) at 50% load', '15–40 under known load flags hard with the load named');
 
   t.group('range flags: running-status guard and unknown-model silence');
   app.S.units.find((u) => u.id === 'u-a').opStatus = 'staged';
