@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-08-01 photo-event -->
+<!-- fleetview build 2026-08-01 sync-guard -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -225,7 +225,7 @@
   <div class="wrap">
     <div class="brand"><div class="logo" id="logoIc"></div><div><b>FLEETVIEW</b><small>Generator Tracker</small></div></div>
     <div class="spacer"></div>
-    <button class="iconbtn" onclick="toggleTheme()" title="Daylight / dark" id="themeBtn">☀️</button>
+    <button class="iconbtn" id="syncChip" style="display:none;width:auto;padding:0 10px;font-family:var(--mono);font-size:11px;color:var(--red);border-color:var(--red)" onclick="retrySync()" title="Some changes have not saved — tap to retry"></button><button class="iconbtn" onclick="toggleTheme()" title="Daylight / dark" id="themeBtn">☀️</button>
     <button class="iconbtn" onclick="openMore()" title="More">☰</button>
     <button class="iconbtn" onclick="openSettings()" title="Settings">⚙️</button>
   </div>
@@ -316,10 +316,35 @@ function fromRow(t,row){const {m,dt}=MAPS[t];const o={};for(const a in m){let v=
 const TABLES=['shops','shows','units','reports','issues','movements','status_events'];
 async function loadAll(){for(const t of TABLES){const {data,error}=await sb.from(t).select('*');if(error){console.warn('load',t,error.message);continue;}S[t]=(data||[]).map(r=>fromRow(t,r));}snapshot();}
 let SNAP={};
-function snapshot(){SNAP={};TABLES.forEach(t=>{SNAP[t]={};S[t].forEach(o=>{SNAP[t][o.id]=JSON.stringify(toRow(t,o));});});}
+function snapshot(){SNAP={};TABLES.forEach(snapshotTable);}
+function snapshotTable(t){SNAP[t]={};S[t].forEach(o=>{SNAP[t][o.id]=JSON.stringify(toRow(t,o));});}
+let SYNC_FAILS={};
 let flushTimer=null,flushing=false;
 function scheduleFlush(){if(!SYNC_READY)return;clearTimeout(flushTimer);flushTimer=setTimeout(flush,450);}
-async function flush(){if(!SYNC_READY||flushing)return;flushing=true;try{await syncPendingPhotos();for(const t of TABLES){const cur={};S[t].forEach(o=>{cur[o.id]=o;});const ups=[];for(const id in cur){const rs=JSON.stringify(toRow(t,cur[id]));if(!SNAP[t]||SNAP[t][id]!==rs)ups.push(toRow(t,cur[id]));}if(ups.length){const {error}=await sb.from(t).upsert(ups);if(error)console.warn('upsert',t,error.message);}const dels=[];if(SNAP[t])for(const id in SNAP[t]){if(!(id in cur))dels.push(id);}if(dels.length){const {error}=await sb.from(t).delete().in('id',dels);if(error)console.warn('del',t,error.message);}}snapshot();}catch(e){console.warn('flush',e);}flushing=false;}
+/* RULE (§8.12): A WRITE THAT FAILS IS NEVER MARKED AS SYNCED. Only tables whose
+   writes all acked re-baseline; a failed table keeps its old SNAP so the diff stays
+   dirty, retries every 30s, and lights the ⚠ chip the user can see. This is the
+   interim guard — the 2026-08-01 movements incident (missing column + warn-and-
+   snapshot = 14h of permanent invisible loss) is why it exists. The full fix
+   (per-row acks, mid-flight-race closure, poison quarantine) is the durable-diff
+   plan: docs/plans/2026-07-29-offline-write-path.md. */
+async function flush(){if(!SYNC_READY||flushing)return;flushing=true;const fails={};
+  try{await syncPendingPhotos();
+    for(const t of TABLES){const cur={};S[t].forEach(o=>{cur[o.id]=o;});
+      const ups=[];for(const id in cur){const rs=JSON.stringify(toRow(t,cur[id]));if(!SNAP[t]||SNAP[t][id]!==rs)ups.push(toRow(t,cur[id]));}
+      const dels=[];if(SNAP[t])for(const id in SNAP[t]){if(!(id in cur))dels.push(id);}
+      let ok=true;
+      if(ups.length){const {error}=await sb.from(t).upsert(ups);if(error){ok=false;fails[t]=(fails[t]||0)+ups.length;console.warn('upsert',t,error.message);}}
+      if(dels.length){const {error}=await sb.from(t).delete().in('id',dels);if(error){ok=false;fails[t]=(fails[t]||0)+dels.length;console.warn('del',t,error.message);}}
+      if(ok)snapshotTable(t);}
+  }catch(e){fails['(connection)']=(fails['(connection)']||0)+1;console.warn('flush',e);}
+  flushing=false;SYNC_FAILS=fails;updateSyncChip();
+  if(Object.keys(fails).length){clearTimeout(flushTimer);flushTimer=setTimeout(flush,30000);}}
+function updateSyncChip(){const el=$('#syncChip');if(!el)return;const ks=Object.keys(SYNC_FAILS);
+  if(!ks.length){el.style.display='none';return;}
+  const n=ks.filter(k=>k!=='(connection)').reduce((a,k)=>a+SYNC_FAILS[k],0);
+  el.style.display='';el.textContent=n?('⚠ '+n+' unsaved'):'⚠ sync failed';}
+function retrySync(){toast('Retrying sync…');clearTimeout(flushTimer);flush();}
 function subscribeRealtime(){try{realtimeCh=sb.channel('fleet_all');TABLES.forEach(t=>realtimeCh.on('postgres_changes',{event:'*',schema:'public',table:t},scheduleReload));realtimeCh.subscribe();}catch(e){console.warn('rt',e);}}
 let reloadTimer=null;
 function scheduleReload(){clearTimeout(reloadTimer);reloadTimer=setTimeout(async()=>{if(flushing){scheduleReload();return;}await loadAll();render();},800);}

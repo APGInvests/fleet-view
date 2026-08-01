@@ -43,4 +43,55 @@ module.exports = async (app, t) => {
   drive('mapSetLoc',        null,                                                          () => app.fn.mapSetLoc('u-mut'));
   drive('capturePlacement', null,                                                          () => app.fn.capturePlacement('u-mut'));
   drive('rmUnitPhoto',      () => { app.S.units[0].photos = ['https://x/p.jpg']; },        () => app.fn.rmUnitPhoto('u-mut', 0));
+
+  t.group('interim guard: a failed write is never marked as synced (§8.12)');
+  // The 2026-08-01 movements incident: warn-and-resnapshot converted a missing
+  // column into 14 hours of permanent invisible loss. Failure now stays dirty,
+  // retries, and lights a chip the user can see.
+  app.setState({ units: [mkUnit({ id: 'u-g1', serial: 'GUARD1' })], shows: [{ id: 'show-A', name: 'A' }] });
+  app.SYNC_READY = true;
+  app.S.units[0].notes = 'edit that must not vanish';
+  app.opts.writeError = (t2) => (t2 === 'units' ? { message: 'column units.ghost does not exist' } : null);
+  await app.fn.flush();
+  app.opts.writeError = null;
+  const snapRow = app.live.SNAP.units && app.live.SNAP.units['u-g1'];
+  t.excludes(String(snapRow), 'edit that must not vanish', 'failed table did NOT re-baseline — rows stay dirty');
+  t.ok(app.live.SYNC_FAILS.units === 1, 'failure counted (got ' + JSON.stringify(app.live.SYNC_FAILS) + ')');
+  app.fn.updateSyncChip();
+  const chip = app.document.querySelector('#syncChip');
+  t.ok(chip.style.display !== 'none', 'chip visible — a console nobody reads is not surfacing');
+  t.includes(chip.textContent, '1 unsaved', 'chip counts the unsaved changes');
+  t.ok(app.timers.some((x) => x.ms === 30000), 'retry scheduled');
+  app.supabaseCalls.length = 0;
+  await app.fn.flush();
+  t.ok(app.supabaseCalls.some((c) => c.table === 'units' && c.op === 'upsert' &&
+    JSON.stringify(c.payload).includes('edit that must not vanish')), 'retry re-sends the same dirty row');
+  t.includes(String(app.live.SNAP.units['u-g1']), 'edit that must not vanish', 'ack advances SNAP');
+  t.deep(app.live.SYNC_FAILS, {}, 'fails cleared on success');
+  app.fn.updateSyncChip();
+  t.eq(chip.style.display, 'none', 'chip hidden when everything saved');
+
+  t.group('interim guard: one bad table does not poison the others');
+  app.setState({ units: [mkUnit({ id: 'u-g2' })], shows: [{ id: 'show-A', name: 'A' }] });
+  app.SYNC_READY = true;
+  app.S.units[0].notes = 'unit edit';
+  app.S.reports.push(mkReport('u-g2', { id: 'r-g2' }));
+  app.opts.writeError = (t2) => (t2 === 'units' ? { message: 'boom' } : null);
+  await app.fn.flush();
+  app.opts.writeError = null;
+  t.ok(app.live.SNAP.reports && app.live.SNAP.reports['r-g2'], 'healthy table acked and re-baselined');
+  t.excludes(String(app.live.SNAP.units['u-g2'] || ''), 'unit edit', 'failing table alone stays dirty');
+
+  t.group('interim guard: failed deletes are retried too');
+  app.setState({ shops: [{ id: 'shop-g', name: 'Yard' }] });
+  app.SYNC_READY = true;
+  app.S.shops = [];
+  app.opts.writeError = (t2, op) => (t2 === 'shops' && op === 'delete' ? { message: 'boom' } : null);
+  await app.fn.flush();
+  app.opts.writeError = null;
+  t.ok(app.live.SNAP.shops && app.live.SNAP.shops['shop-g'], 'failed delete keeps its SNAP entry (still owed)');
+  app.supabaseCalls.length = 0;
+  await app.fn.flush();
+  t.ok(app.supabaseCalls.some((c) => c.table === 'shops' && c.op === 'delete'), 'delete re-attempted');
+  t.ok(!app.live.SNAP.shops['shop-g'], 'acked delete clears the SNAP entry');
 };
