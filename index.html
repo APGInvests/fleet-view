@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-31 rating-stamp -->
+<!-- fleetview build 2026-07-31 near-match -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -350,6 +350,19 @@ function locName(type,id){if(type==='show'){const s=showById(id);return s?s.name
 function unitByTag(tag){const t=String(tag).trim().toLowerCase();return S.units.find(u=>String(u.tagId).trim().toLowerCase()===t);}
 function unitByCode(c){c=String(c||'').trim().toLowerCase();if(!c)return null;return S.units.find(u=>String(u.serial||'').trim().toLowerCase()===c||String(u.tagId||'').trim().toLowerCase()===c)||null;}
 function unitById(id){return S.units.find(u=>u.id===id);}
+function nrmCode(s){return String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');}
+/* Damerau-Levenshtein (OSA): an adjacent transposition counts as ONE edit — the real
+   UCV700618/UVC700618 duplicate is distance 2 under plain Levenshtein and would be
+   missed by a distance-1 rule. Compared on alphanumerics only, so case and separators
+   are already ignored (HANDOFF §10 1c). Offers candidates; validates, rejects and
+   corrects nothing — §8 rule 4. */
+function dlDist(a,b,max){const la=a.length,lb=b.length;if(!la||!lb)return Math.max(la,lb);if(Math.abs(la-lb)>max)return max+1;
+  const d=[];for(let i=0;i<=la;i++){d[i]=new Array(lb+1);d[i][0]=i;}for(let j=0;j<=lb;j++)d[0][j]=j;
+  for(let i=1;i<=la;i++){for(let j=1;j<=lb;j++){const c=a[i-1]===b[j-1]?0:1;let v=Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+c);
+    if(i>1&&j>1&&a[i-1]===b[j-2]&&a[i-2]===b[j-1])v=Math.min(v,d[i-2][j-2]+1);d[i][j]=v;}}return d[la][lb];}
+function nearMatches(code,cap){const q=nrmCode(code);if(!q)return[];const out=[];
+  S.units.forEach(u=>{const ds=Math.min(dlDist(q,nrmCode(u.serial),1),dlDist(q,nrmCode(u.tagId),1));if(ds<=1)out.push({u,ds});});
+  out.sort((a,b)=>a.ds-b.ds||String(a.u.serial||'').localeCompare(String(b.u.serial||'')));return out.slice(0,cap||4).map(x=>x.u);}
 function unitsOnShow(id){return S.units.filter(u=>u.locationType==='show'&&u.locationId===id);}
 function incomingToShow(id){return S.units.filter(u=>u.locationType==='transit'&&u.inTransitToShowId===id);}
 function reportsFor(id){return S.reports.filter(r=>r.unitId===id).sort((a,b)=>b.timestamp-a.timestamp);}
@@ -732,9 +745,18 @@ function startScanner(){const msg=$('#scanMsg');if(!msg)return;if(typeof Html5Qr
     scanner.start({facingMode:{ideal:"environment"}},startCfg,onOk,()=>{}).then(()=>{msg.textContent='Point at the barcode or QR. Hold steady.';setTimeout(setupTorch,700);}).catch(err=>{try{scanner.start({facingMode:"user"},startCfg,onOk,()=>{}).then(()=>{msg.textContent='Scanning…';setTimeout(setupTorch,700);}).catch(()=>fail(err));}catch(e){fail(err);}});
   }catch(e){msg.innerHTML='Camera couldn\'t start. Type the code below.';}}
 function stopScanner(){torchOn=false;if(scanner){try{scanner.stop().then(()=>{try{scanner.clear();}catch(e){}scanner=null;}).catch(()=>{scanner=null;});}catch(e){scanner=null;}}}
-function handleCode(code){code=String(code||'').trim().toUpperCase();if(!code){toast('Enter a code');return;}stopScanner();const ex=unitByCode(code);if(ex)pickAsset(ex.id);else editUnit(null,code);}
+function handleCode(code){code=String(code||'').trim().toUpperCase();if(!code){toast('Enter a code');return;}stopScanner();const ex=unitByCode(code);if(ex){pickAsset(ex.id);return;}
+  /* a misread barcode fails exactly like a typo — the scan path gets candidates too */
+  const near=nearMatches(code,4);if(!near.length){editUnit(null,code);return;}
+  sheet('No exact match',`<p class="muted" style="margin-top:0">Nothing in the fleet reads <b>${esc(code)}</b> exactly. Did you mean:</p>${near.map(u=>`<div class="card" style="padding:10px 12px;margin-bottom:7px;cursor:pointer" onclick="pickAsset('${u.id}')"><div class="between"><b style="font-size:14px">#${esc(u.serial||u.tagId||'—')}</b><span class="muted" style="font-size:11px">${esc(whereIs(u))}</span></div><div class="muted" style="font-size:12px;margin-top:2px">${esc([u.make,u.model].filter(Boolean).join(' ')||'—')}${u.kw?(' · '+u.kw+' kVA'):''}</div></div>`).join('')}<button class="btn ghost block" style="margin-top:6px" onclick="editUnit(null,'${esc(code)}')">+ Add new asset “${esc(code)}” anyway</button>`,stopScanner);}
 function pickAsset(unitId){const u=unitById(unitId);if(!u)return;stopScanner();const s=currentShow();if(addMode!=='fleet'&&s&&u.locationType==='show'&&u.locationId===s.id){closeSheet();openUnit(unitId);toast('Already on this job');return;}moveMenu(unitId,true);}
-function searchFleet(q){const box=$('#searchResults');if(!box)return;q=String(q||'').trim();if(!q){box.innerHTML='';return;}const ql=q.toLowerCase();const hits=S.units.filter(u=>[u.serial,u.tagId,u.make,u.model,(u.kw?u.kw+' kva':'')].some(x=>String(x||'').toLowerCase().includes(ql))).slice(0,6);if(!hits.length){box.innerHTML='<div class="muted" style="font-size:13px;padding:8px 2px">No match in the fleet. Tap “+ Add new asset”.</div>';return;}const s=currentShow();box.innerHTML=hits.map(u=>{const here=(addMode==='job'&&s&&u.locationType==='show'&&u.locationId===s.id);return `<div class="card" style="padding:10px 12px;margin-bottom:7px;cursor:pointer" onclick="pickAsset('${u.id}')"><div class="between"><b style="font-size:14px">#${esc(u.serial||u.tagId||'—')}</b>${here?'<span class="pill" style="background:var(--green)">on this job</span>':`<span class="muted" style="font-size:11px">${esc(whereIs(u))}</span>`}</div><div class="muted" style="font-size:12px;margin-top:2px">${esc([u.make,u.model].filter(Boolean).join(' ')||'—')}${u.kw?(' · '+u.kw+' kVA'):''}</div></div>`;}).join('');}
+function searchFleet(q){const box=$('#searchResults');if(!box)return;q=String(q||'').trim();if(!q){box.innerHTML='';return;}const ql=q.toLowerCase();const s=currentShow();
+  const card=u=>{const here=(addMode==='job'&&s&&u.locationType==='show'&&u.locationId===s.id);return `<div class="card" style="padding:10px 12px;margin-bottom:7px;cursor:pointer" onclick="pickAsset('${u.id}')"><div class="between"><b style="font-size:14px">#${esc(u.serial||u.tagId||'—')}</b>${here?'<span class="pill" style="background:var(--green)">on this job</span>':`<span class="muted" style="font-size:11px">${esc(whereIs(u))}</span>`}</div><div class="muted" style="font-size:12px;margin-top:2px">${esc([u.make,u.model].filter(Boolean).join(' ')||'—')}${u.kw?(' · '+u.kw+' kVA'):''}</div></div>`;};
+  const hits=S.units.filter(u=>[u.serial,u.tagId,u.make,u.model,(u.kw?u.kw+' kva':'')].some(x=>String(x||'').toLowerCase().includes(ql))).slice(0,6);
+  if(hits.length){box.innerHTML=hits.map(card).join('');return;}
+  const near=nearMatches(q,4);
+  if(near.length){box.innerHTML='<div class="muted" style="font-size:13px;padding:8px 2px">No exact match. Did you mean:</div>'+near.map(card).join('')+'<div class="muted" style="font-size:12px;padding:2px 2px 6px">Not one of these? “+ Add new asset” adds it exactly as typed.</div>';return;}
+  box.innerHTML='<div class="muted" style="font-size:13px;padding:8px 2px">No match in the fleet. Tap “+ Add new asset”.</div>';}
 function addNewFromSearch(){const el=$('#assetSearch');const q=el?el.value.trim():'';stopScanner();editUnit(null,q);}
 /* ===== GPS ===== */
 let lastGPS=null,formGps=null;
