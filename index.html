@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-08-01 sync-guard -->
+<!-- fleetview build 2026-08-01 merge-on-load -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -225,7 +225,7 @@
   <div class="wrap">
     <div class="brand"><div class="logo" id="logoIc"></div><div><b>FLEETVIEW</b><small>Generator Tracker</small></div></div>
     <div class="spacer"></div>
-    <button class="iconbtn" id="syncChip" style="display:none;width:auto;padding:0 10px;font-family:var(--mono);font-size:11px;color:var(--red);border-color:var(--red)" onclick="retrySync()" title="Some changes have not saved — tap to retry"></button><button class="iconbtn" onclick="toggleTheme()" title="Daylight / dark" id="themeBtn">☀️</button>
+    <button class="iconbtn" id="syncChip" style="display:none;width:auto;padding:0 10px;font-family:var(--mono);font-size:11px;color:var(--red);border-color:var(--red)" onclick="openSyncStatus()" title="Sync needs attention — tap for details"></button><button class="iconbtn" onclick="toggleTheme()" title="Daylight / dark" id="themeBtn">☀️</button>
     <button class="iconbtn" onclick="openMore()" title="More">☰</button>
     <button class="iconbtn" onclick="openSettings()" title="Settings">⚙️</button>
   </div>
@@ -314,7 +314,31 @@ const MAPS={
 function toRow(t,o){const {m,dt,ro}=MAPS[t];const r={};for(const a in m){let v=o[a];if(v===undefined)v=null;if(dt.includes(a))v=DT.to(v);r[m[a]]=v;}if(ro)for(const c of ro)delete r[c];return r;}
 function fromRow(t,row){const {m,dt}=MAPS[t];const o={};for(const a in m){let v=row[m[a]];if(v!==undefined&&dt.includes(a))v=DT.from(v);o[a]=(v===undefined?null:v);}return o;}
 const TABLES=['shops','shows','units','reports','issues','movements','status_events'];
-async function loadAll(){for(const t of TABLES){const {data,error}=await sb.from(t).select('*');if(error){console.warn('load',t,error.message);continue;}S[t]=(data||[]).map(r=>fromRow(t,r));}snapshot();}
+let SYNC_LOST=[]; /* LWW-superseded local edits — parked visibly, never silent (§8.12 family). Session-scoped until the durable cache (plan 3.1) persists it. */
+function mergeServerState(t,serverRows){
+  const server={};serverRows.forEach(r=>{server[r.id]=r;});
+  const localById={};S[t].forEach(o=>{localById[o.id]=o;});
+  const merged={},outSnap={};
+  for(const id in server){merged[id]=server[id];outSnap[id]=JSON.stringify(toRow(t,server[id]));}
+  /* pending local delete: absent locally, present in old SNAP -> stays gone; the
+     server serialization stays in SNAP so the diff still emits the delete */
+  if(SNAP[t])for(const id in SNAP[t]){if(!localById[id]&&server[id])delete merged[id];}
+  S[t].forEach(o=>{
+    const rs=JSON.stringify(toRow(t,o));const snapRs=SNAP[t]?SNAP[t][o.id]:undefined;
+    if(snapRs===rs)return;                                   /* clean: server version stands */
+    const sv=server[o.id];
+    if(t==='units'&&sv&&sv.updatedAt!=null&&o.updatedAt!=null&&sv.updatedAt>=o.updatedAt){
+      SYNC_LOST.push({table:t,serial:o.serial||o.tagId||o.id,row:o,ts:now()});return;}
+    merged[o.id]=o;if(snapRs!==undefined)outSnap[o.id]=snapRs;else delete outSnap[o.id];});  /* dirty rows stay dirty */
+  S[t]=Object.values(merged);SNAP[t]=outSnap;}
+/* Server state merges OVER pending local dirt; it never replaces it. A failed read
+   keeps local rows AND the old SNAP — a reload (or a failed select) must never
+   launder unsaved work clean. Units resolve by updatedAt LWW; losers park in
+   SYNC_LOST, surfaced through the sync chip. */
+async function loadAll(){for(const t of TABLES){const {data,error}=await sb.from(t).select('*');
+  if(error){console.warn('load',t,error.message);continue;}
+  mergeServerState(t,(data||[]).map(r=>fromRow(t,r)));}
+  updateSyncChip();}
 let SNAP={};
 function snapshot(){SNAP={};TABLES.forEach(snapshotTable);}
 function snapshotTable(t){SNAP[t]={};S[t].forEach(o=>{SNAP[t][o.id]=JSON.stringify(toRow(t,o));});}
@@ -340,10 +364,15 @@ async function flush(){if(!SYNC_READY||flushing)return;flushing=true;const fails
   }catch(e){fails['(connection)']=(fails['(connection)']||0)+1;console.warn('flush',e);}
   flushing=false;SYNC_FAILS=fails;updateSyncChip();
   if(Object.keys(fails).length){clearTimeout(flushTimer);flushTimer=setTimeout(flush,30000);}}
-function updateSyncChip(){const el=$('#syncChip');if(!el)return;const ks=Object.keys(SYNC_FAILS);
-  if(!ks.length){el.style.display='none';return;}
+function updateSyncChip(){const el=$('#syncChip');if(!el)return;const ks=Object.keys(SYNC_FAILS);const lost=SYNC_LOST.length;
+  if(!ks.length&&!lost){el.style.display='none';return;}
   const n=ks.filter(k=>k!=='(connection)').reduce((a,k)=>a+SYNC_FAILS[k],0);
-  el.style.display='';el.textContent=n?('⚠ '+n+' unsaved'):'⚠ sync failed';}
+  const parts=[];if(ks.length)parts.push(n?(n+' unsaved'):'sync failed');if(lost)parts.push(lost+' overwritten');
+  el.style.display='';el.textContent='⚠ '+parts.join(' · ');}
+function openSyncStatus(){const ks=Object.keys(SYNC_FAILS);const n=ks.filter(k=>k!=='(connection)').reduce((a,k)=>a+SYNC_FAILS[k],0);
+  sheet('Sync status',`<div class="card" style="padding:13px;margin-bottom:12px"><div class="kv"><div class="k">Unsaved</div><div>${ks.length?((n||'connection error')+' — retrying every 30s'):'0'}</div><div class="k">Overwritten</div><div>${SYNC_LOST.length}</div></div></div>${SYNC_LOST.length?`<h2 class="section sm">Overwritten while unsaved</h2><p class="muted" style="font-size:12px">Someone else saved a newer version before your change went through. Your entry is kept here — copy it out if it still matters, then re-enter what's current.</p>${SYNC_LOST.map((x,i)=>`<div class="card" style="padding:12px;margin-bottom:8px;border-left:5px solid var(--orange)"><div class="between"><b style="font-size:13px">#${esc(x.serial)}</b><span class="muted" style="font-size:11px">${fmtDate(x.ts)}</span></div><div class="muted" style="font-size:11.5px;margin-top:4px">${esc(String(x.row&&x.row.notes||''))}</div><div class="row" style="margin-top:8px"><button class="btn ghost sm wide" onclick="copyLost(${i})">Copy JSON</button><button class="btn ghost sm wide" onclick="dismissLost(${i})">Dismiss</button></div></div>`).join('')}`:''}<button class="btn primary block" onclick="retrySync();closeSheet()">Sync now</button>`);}
+function copyLost(i){try{navigator.clipboard.writeText(JSON.stringify(SYNC_LOST[i],null,2));}catch(e){}toast('Copied');}
+function dismissLost(i){SYNC_LOST.splice(i,1);updateSyncChip();openSyncStatus();}
 function retrySync(){toast('Retrying sync…');clearTimeout(flushTimer);flush();}
 function subscribeRealtime(){try{realtimeCh=sb.channel('fleet_all');TABLES.forEach(t=>realtimeCh.on('postgres_changes',{event:'*',schema:'public',table:t},scheduleReload));realtimeCh.subscribe();}catch(e){console.warn('rt',e);}}
 let reloadTimer=null;

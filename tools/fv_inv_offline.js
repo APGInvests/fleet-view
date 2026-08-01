@@ -82,6 +82,69 @@ module.exports = async (app, t) => {
   t.ok(app.live.SNAP.reports && app.live.SNAP.reports['r-g2'], 'healthy table acked and re-baselined');
   t.excludes(String(app.live.SNAP.units['u-g2'] || ''), 'unit edit', 'failing table alone stays dirty');
 
+  t.group('merge-on-load: a reload never destroys queued work');
+  // With five techs and realtime on, someone writes every few minutes — the old
+  // wholesale-replace loadAll defeated the retry window routinely. Server state
+  // merges OVER pending local dirt; it never replaces it.
+  app.setState({ units: [mkUnit({ id: 'u-m1', updatedAt: 1000 })], shows: [{ id: 'show-A', name: 'A' }] });
+  app.SYNC_READY = true;
+  app.S.reports.push(mkReport('u-m1', { id: 'r-pend' }));           // dirty, unflushed
+  app.opts.tableData = { units: [app.fn.toRow('units', mkUnit({ id: 'u-m1', updatedAt: 1000 }))], reports: [] };
+  await app.fn.loadAll();
+  t.ok(app.S.reports.some((r) => r.id === 'r-pend'), 'dirty report survives the reload');
+  t.ok(!(app.live.SNAP.reports && app.live.SNAP.reports['r-pend']), 'and is still queued for flush');
+
+  t.group('merge-on-load: pending local deletes stay deleted and still delete');
+  app.setState({ units: [mkUnit({ id: 'u-del', updatedAt: 1000 })], shows: [{ id: 'show-A', name: 'A' }] });
+  app.SYNC_READY = true;
+  const delRow = app.fn.toRow('units', app.S.units[0]);
+  app.S.units = [];                                                  // local delete, unflushed
+  app.opts.tableData = { units: [delRow] };                          // server still has it
+  await app.fn.loadAll();
+  t.eq(app.S.units.length, 0, 'deleted unit does not resurrect on reload');
+  app.supabaseCalls.length = 0;
+  await app.fn.flush();
+  t.ok(app.supabaseCalls.some((c) => c.table === 'units' && c.op === 'delete'), 'the delete still reaches the server');
+
+  t.group('merge-on-load: units LWW — fresher server wins, the loser is PARKED, never vaporized');
+  app.setState({ units: [mkUnit({ id: 'u-lww', updatedAt: 500 })], shows: [{ id: 'show-A', name: 'A' }] });
+  app.SYNC_READY = true;
+  app.live.SYNC_LOST = [];
+  Object.assign(app.S.units[0], { updatedAt: 1000, opStatus: 'down', locationId: 'show-OLD', notes: 'offline note' });
+  app.opts.tableData = { units: [app.fn.toRow('units', mkUnit({ id: 'u-lww', updatedAt: 2000, opStatus: 'running', locationId: 'show-NEW' }))] };
+  await app.fn.loadAll();
+  t.eq(app.S.units[0].locationId, 'show-NEW', 'fresher server location wins — a stale row cannot move a unit');
+  t.eq(app.S.units[0].opStatus, 'running', 'fresher server status wins');
+  t.eq(app.live.SYNC_LOST.length, 1, 'losing local edit parked in SYNC_LOST — visible, not silent (rule 12 family)');
+  t.includes(JSON.stringify(app.live.SYNC_LOST[0]), 'offline note', 'full losing row preserved for the tech');
+  app.fn.updateSyncChip();
+  t.includes(app.document.querySelector('#syncChip').textContent, 'overwritten', 'chip surfaces the overwrite');
+  app.fn.openSyncStatus();
+  const sheetHtml = app.document.querySelector('#sheet').innerHTML;
+  t.includes(sheetHtml, 'offline note', 'status sheet shows what was overwritten');
+
+  t.group('merge-on-load: newer local edit survives and stays queued');
+  app.setState({ units: [mkUnit({ id: 'u-lww2', updatedAt: 500 })], shows: [{ id: 'show-A', name: 'A' }] });
+  app.SYNC_READY = true;
+  app.live.SYNC_LOST = [];
+  Object.assign(app.S.units[0], { updatedAt: 3000, notes: 'local newer' });
+  app.opts.tableData = { units: [app.fn.toRow('units', mkUnit({ id: 'u-lww2', updatedAt: 2000 }))] };
+  await app.fn.loadAll();
+  t.eq(app.S.units[0].notes, 'local newer', 'newer local unit edit kept');
+  t.excludes(String(app.live.SNAP.units['u-lww2'] || ''), 'local newer', 'and still dirty for the next flush');
+  t.eq(app.live.SYNC_LOST.length, 0, 'the winner is not parked');
+
+  t.group('merge-on-load: a failed READ no longer launders dirty rows');
+  app.setState({ units: [mkUnit({ id: 'u-rd', updatedAt: 1000 })], shows: [{ id: 'show-A', name: 'A' }] });
+  app.SYNC_READY = true;
+  app.S.units[0].notes = 'must stay dirty';
+  app.opts.readError = (t2) => (t2 === 'units' ? { message: 'boom' } : null);
+  await app.fn.loadAll();
+  app.opts.readError = null;
+  t.eq(app.S.units[0].notes, 'must stay dirty', 'local rows kept when the table select fails');
+  t.excludes(String(app.live.SNAP.units['u-rd'] || ''), 'must stay dirty', 'old SNAP kept — errored table is NOT re-baselined');
+  app.opts.tableData = null;
+
   t.group('interim guard: failed deletes are retried too');
   app.setState({ shops: [{ id: 'shop-g', name: 'Yard' }] });
   app.SYNC_READY = true;
