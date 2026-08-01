@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-31 fuel-psi -->
+<!-- fleetview build 2026-07-31 rating-stamp -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -300,7 +300,7 @@ const MAPS={
   shops:{m:{id:'id',name:'name',createdAt:'created_at'},dt:['createdAt']},
   shows:{m:{id:'id',name:'name',location:'location',startDate:'start_date',site:'site',createdAt:'created_at'},dt:['createdAt']},
   units:{m:{id:'id',tagId:'tag_id',serial:'serial',klass:'klass',config:'config',trailer:'trailer',make:'make',model:'model',kw:'kw',breakerSize:'breaker_size',fuelType:'fuel_type',tankGallons:'tank_gallons',weightLbs:'weight_lbs',currentHours:'current_hours',serviceDueHours:'service_due_hours',lastServiceHours:'last_service_hours',area:'area',locNote:'loc_note',opStatus:'op_status',locationType:'location_type',locationId:'location_id',inTransitToShowId:'in_transit_to_show_id',photos:'photos',jobMeta:'job_meta',engines:'engines',notes:'notes',createdAt:'created_at',updatedAt:'updated_at'},dt:['createdAt','updatedAt']},
-  reports:{m:{id:'id',unitId:'unit_id',showId:'show_id',techName:'tech_name',timestamp:'ts',gps:'gps',voltageLL:'voltage_ll',voltageLN:'voltage_ln',ampsL1:'amps_l1',ampsL2:'amps_l2',ampsL3:'amps_l3',hz:'hz',loadKw:'load_kw',loadPct:'load_pct',coolantTemp:'coolant_temp',oilTemp:'oil_temp',oilPressure:'oil_pressure',fuelLevelPct:'fuel_level_pct',batteryV:'battery_v',defPct:'def_pct',engineHours:'engine_hours',engine:'engine',fuelPsi:'fuel_psi',notes:'notes'},dt:['timestamp'],ro:['received_at']},
+  reports:{m:{id:'id',unitId:'unit_id',showId:'show_id',techName:'tech_name',timestamp:'ts',gps:'gps',voltageLL:'voltage_ll',voltageLN:'voltage_ln',ampsL1:'amps_l1',ampsL2:'amps_l2',ampsL3:'amps_l3',hz:'hz',loadKw:'load_kw',loadPct:'load_pct',coolantTemp:'coolant_temp',oilTemp:'oil_temp',oilPressure:'oil_pressure',fuelLevelPct:'fuel_level_pct',batteryV:'battery_v',defPct:'def_pct',engineHours:'engine_hours',engine:'engine',fuelPsi:'fuel_psi',ratingKva:'rating_kva',notes:'notes'},dt:['timestamp'],ro:['received_at']},
   issues:{m:{id:'id',unitId:'unit_id',showId:'show_id',severity:'severity',title:'title',text:'text',techName:'tech_name',timestamp:'ts',gps:'gps',resolved:'resolved',photos:'photos',engine:'engine'},dt:['timestamp'],ro:['received_at']},
   movements:{m:{id:'id',unitId:'unit_id',fromType:'from_type',fromId:'from_id',toType:'to_type',toId:'to_id',techName:'tech_name',timestamp:'ts',gps:'gps'},dt:['timestamp'],ro:['received_at']},
   status_events:{m:{id:'id',unitId:'unit_id',engine:'engine',status:'status',techName:'tech_name',timestamp:'ts'},dt:['timestamp'],ro:['received_at']}
@@ -937,7 +937,7 @@ function logVitals(unitId,eng){const u=unitById(unitId);const e=(eng&&isTwin(u))
    value observed. The status selector is the deliberate opposite (it starts on the
    unit's current status) because an operating mode is not a measurement. */
 function vseg(b){vsegVal=b.dataset.v;document.querySelectorAll('#v_seg button').forEach(x=>{x.classList.remove('on');x.style.background='';x.style.color='';});b.classList.add('on');b.style.color='#fff';b.style.background=b.dataset.v==='running'?'var(--green)':b.dataset.v==='down'?'var(--red)':'var(--grey)';}
-function saveVitals(unitId,eng){const u=unitById(unitId);const e=(eng&&isTwin(u))?eng:null;const g=x=>num($('#'+x).value);const rk=engKva(u,e);const r={id:uid('rpt'),unitId,showId:S.currentShowId,techName:S.settings.techName,timestamp:now(),gps:null,engine:e,voltageLL:g('v_ll'),voltageLN:g('v_ln'),ampsL1:g('v_a1'),ampsL2:g('v_a2'),ampsL3:g('v_a3'),hz:g('v_hz'),loadKw:g('v_kw'),loadPct:(function(){const kw=g('v_kw');if(kw==null||!rk||rk<=0)return null;return Math.round(kw/(rk*0.8)*100);})(),coolantTemp:g('v_ct'),oilPressure:g('v_op'),fuelPsi:(u.klass==='big'?g('v_fp'):null),fuelLevelPct:g('v_fuel'),batteryV:g('v_bat'),defPct:g('v_def'),engineHours:g('v_hrs'),notes:$('#v_notes').value.trim()};S.reports.push(r);if(r.engineHours!=null&&!isTwin(u))u.currentHours=r.engineHours;
+function saveVitals(unitId,eng){const u=unitById(unitId);const e=(eng&&isTwin(u))?eng:null;const g=x=>num($('#'+x).value);const rk=engKva(u,e);const r={id:uid('rpt'),unitId,showId:S.currentShowId,techName:S.settings.techName,timestamp:now(),gps:null,engine:e,voltageLL:g('v_ll'),voltageLN:g('v_ln'),ampsL1:g('v_a1'),ampsL2:g('v_a2'),ampsL3:g('v_a3'),hz:g('v_hz'),loadKw:g('v_kw'),loadPct:(function(){const kw=g('v_kw');if(kw==null||!rk||rk<=0)return null;return Math.round(kw/(rk*0.8)*100);})(),ratingKva:rk,coolantTemp:g('v_ct'),oilPressure:g('v_op'),fuelPsi:(u.klass==='big'?g('v_fp'):null),fuelLevelPct:g('v_fuel'),batteryV:g('v_bat'),defPct:g('v_def'),engineHours:g('v_hrs'),notes:$('#v_notes').value.trim()};S.reports.push(r);if(r.engineHours!=null&&!isTwin(u))u.currentHours=r.engineHours;
   /* the check form's status selector writes the same event, so "who called it down"
      is recorded wherever the change was made */
   const _prevSt=e?engStatus(u,e):((u&&u.opStatus)||'staged');

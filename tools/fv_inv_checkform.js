@@ -57,4 +57,28 @@ module.exports = async (app, t) => {
   app.S.reports.forEach((x) => { delete x.fuelPsi; });
   const tbl2 = app.fn.recentChecksTable(app.fn.reportsFor('u-big'));
   t.excludes(tbl2, 'Fuel psi', 'row absent when no unit ever recorded it');
+
+  t.group('check form: every report stamps the rating it was measured against');
+  // Load % is stored on append-only rows; without the rating stamped alongside,
+  // a future prime/standby convention change silently breaks comparability.
+  app.setState({ units: [
+    mkUnit({ id: 'u-rated', klass: 'big', kw: 625 }),
+    mkUnit({ id: 'u-norate', klass: 'big', kw: null }),
+    mkUnit({ id: 'u-tw', klass: 'big', kw: 500, engines: { style: 'AB', A: { kvaEach: 438 }, B: {} } }),
+  ], shows: [{ id: 'show-A', name: 'A' }] });
+  app.S.settings.techName = 'Mike R.';
+  const check = (uid2, eng, expect, label) => {
+    app.fn.logVitals(uid2, eng);
+    app.fn.saveVitals(uid2, eng || undefined);
+    const rr = app.S.reports.filter((x) => x.unitId === uid2).slice(-1)[0];
+    t.ok(rr && (expect === null ? rr.ratingKva === null : rr.ratingKva === expect),
+      label + ' (got ' + (rr && rr.ratingKva) + ')');
+    return rr;
+  };
+  const r1 = check('u-rated', null, 625, 'single unit stamps u.kw');
+  check('u-norate', null, null, 'no rating set -> stamps null, never a guess');
+  check('u-tw', 'A', 438, 'TwinPak engine stamps its own kvaEach, not the package kw');
+  const row2 = app.fn.toRow('reports', r1);
+  t.eq(row2.rating_kva, 625, 'persists as rating_kva');
+  t.eq(app.fn.fromRow('reports', row2).ratingKva, 625, 'round-trips back');
 };
