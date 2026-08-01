@@ -518,6 +518,53 @@ Per HANDOFF §9's production rule and the stubbed-sandbox-qa pattern. The SW **m
 
 ---
 
+# Phase 3 refresh — 2026-08-01 (read this before executing any 3.x task)
+
+The plan below was written 2026-07-29; the codebase has since absorbed the Hyperagent
+big-iron rebuild and the movements incident. The design stands; the code anchors don't.
+
+**What changed in the world:**
+- `TABLES` is now seven: `status_events` joined (its `id` is text while `units.id` is
+  uuid — HANDOFF §7). Engines/per-engine status exist; TwinPak `saveVitals` no longer
+  writes flat `currentHours`; the every-units-mutator-bumps-`updatedAt` invariant is
+  live in `fv_inv_offline.js` (LWW's precondition, already enforced).
+- **Task 3.2 is DONE** — owner ran the `received_at` bundle 2026-08-01 (nullable
+  variant, no backfill: old rows honestly null). All four columns verified together.
+- Movements carry `kind` ('photo' = placement photo, excluded from unitGps/recents by
+  explicit guard) and `photos`. Movements stay append-only in merge terms.
+- **Execution reorder, by live risk:** 3.5 (merge-on-load) → 3.3 (full ack flush) →
+  3.4 (dead-letter UI) → 3.1 (KV cache/hydrate) → 3.6 (reconnect triggers) → 3.7.
+  Rationale: with five techs and realtime on, `loadAll()`'s wholesale replace defeats
+  the 30s retry window every few minutes — reload-clobber is the sharpest open hole.
+- **Schema gate per build (rule 12's origin — never split again):** every 3.x build
+  names its schema needs before push, run as one batch with one verification.
+  3.5: NONE. 3.3: NONE. 3.4: NONE (DEAD is device-local). 3.1: NONE (IndexedDB is
+  client-side; drill copies must namespace the DB name `fleetview`). 3.6: NONE.
+
+**What the interim guard (build `sync-guard`) already implements of Task 3.3 —
+the full build is a DIFF against this, not a rewrite:**
+- ✅ Per-TABLE ack: `snapshotTable(t)` runs only when that table's upserts AND deletes
+  ack; failed tables keep old SNAP (rows stay dirty). Failed deletes keep their SNAP
+  entries and re-send.
+- ✅ 30s auto-retry via `flushTimer`; `retrySync()` manual retry.
+- ✅ Visibility: `SYNC_FAILS` + red `#syncChip` ("⚠ N unsaved" / "⚠ sync failed"),
+  `updateSyncChip()`. Task 3.4 extends THIS chip (pending + stuck + overwritten
+  counts, status sheet) — do not build the plan's separate chip.
+- ❌ Still owed by 3.3 (the diff): `captureDiff()` synchronously at entry + per-ROW
+  acks from the captured serialization (the mid-flight-mutation race — per-table
+  snapshot after `await` still absorbs concurrent same-table edits as "synced");
+  upserts strictly in TABLES order halting on retryable failure (children never
+  outrun a failed parent) and deletes in reverse order; `RETRYABLE()` classification;
+  poison isolation → DEAD quarantine (today a permanently-rejected row retries every
+  30s forever, visibly); tail-drain rerun when dirt landed mid-flight.
+
+**Task 3.5 addendum (from the same incident):** `loadAll()`'s trailing `snapshot()`
+runs even for tables whose SELECT failed — a failed READ also launders dirty rows
+clean. Merge-on-load must re-baseline per-table only from successfully loaded data,
+and keep both local rows and old SNAP for tables that errored. LWW losers are parked
+visibly per the approved plan (pre-3.4, a session-scoped `SYNC_LOST` list surfaced
+through the existing chip + a minimal status sheet; 3.4 migrates it into DEAD).
+
 # Phase 3 — The durable diff
 
 All tests in this phase live in `tools/fv_inv_offline.js` (standing). Each task appends a `t.group(...)` block; the file accretes into the offline contract. Local fixture helpers at the top of the file:
