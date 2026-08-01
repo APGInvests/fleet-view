@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-08-01 placement-photos -->
+<!-- fleetview build 2026-08-01 fleet-headline -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -664,7 +664,7 @@ function renderFleet(){let list=S.units.slice();
   if(fleetSearch){const q=fleetSearch.toLowerCase();list=list.filter(u=>[u.tagId,u.serial,u.make,u.model].some(x=>String(x||'').toLowerCase().includes(q)));}
   list=list.filter(u=>passFilter(u,fleetFilter)).sort(byKva);
   const rows=list.map(u=>{const cs=computeStatus(u);return `<div class="swipe-wrap"><div class="swipe-maphint">🗺 Map</div><div class="swipe-actions"><button class="swipe-act del" onclick="event.stopPropagation();closeSwipe(this);confirmDeleteUnit('${u.id}')">Delete</button></div><div class="card swipe-card" style="padding:12px 14px;margin-bottom:0;cursor:pointer;border-left:5px solid ${SC[cs.color]}" onpointerdown="swStart(event,this)" onpointermove="swMove(event,this)" onpointerup="swEnd(event,this,'${u.id}')" onpointercancel="swCancel(this)">
-    <div class="between"><div style="min-width:0"><div style="font-family:var(--serif);font-size:18px;font-weight:700">${esc((u.model||u.make||'GEN')+' · #'+(u.serial||u.tagId||'—'))}</div>
+    <div class="between"><div style="min-width:0"><div style="font-family:var(--serif);font-size:18px;font-weight:700">${esc(([u.make,u.model].map(x=>String(x||'').trim()).filter(Boolean).join(' ')||'GEN')+' · #'+(u.serial||u.tagId||'—'))}</div>
     <div class="uloc" style="margin-top:3px">${IC.pin}<span>${esc(whereIs(u))}</span></div></div>${statusPill(cs)}</div></div></div>`;}).join('');
   return `<div class="between"><h2 class="section" style="margin:0">Fleet</h2><span class="muted" style="font-family:var(--mono);font-size:12px">${S.units.length} assets</span></div>
     <p class="muted" style="margin:6px 0 12px;font-size:13px">Every asset the company owns, wherever it is.</p>

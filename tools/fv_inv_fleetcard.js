@@ -1,0 +1,33 @@
+/**
+ * fv_inv_fleetcard.js — standing invariants for the Fleet-list card.
+ *
+ * The Fleet list is the 153-unit scanning surface. Contract: the headline is
+ * make + model (make always, model appended when known) so identical
+ * manufacturers read identically regardless of which fields are filled; the
+ * kVA rating renders on its own right-aligned line (a unit with no job still
+ * shows its size); empty-string and null are the same absence (the TGD
+ * hand-entry lesson — coalesce, don't null-check).
+ */
+'use strict';
+module.exports = async (app, t) => {
+  let seq = 0;
+  const id = (p) => p + '-' + (++seq);
+  const mkUnit = (o = {}) => Object.assign({ id: id('u'), serial: id('SER'), tagId: '', klass: 'big',
+    make: 'CAT', model: 'XQ-500', kw: 625, opStatus: 'running',
+    locationType: 'fleet', locationId: null, photos: [], jobMeta: {}, updatedAt: 1 }, o);
+  const fleetHtml = () => { app.live.TAB = 'fleet'; return app.fn.renderFleet(); };
+
+  t.group('fleet card: headline is make + model, consistently');
+  app.setState({ units: [
+    mkUnit({ id: 'u-both', serial: 'S-BOTH', make: 'CAT', model: 'XQ-500' }),
+    mkUnit({ id: 'u-makeonly', serial: 'S-MAKE', make: 'CAT', model: null }),
+    mkUnit({ id: 'u-emptymodel', serial: 'S-EMPTY', make: 'Technogen', model: '' }),
+    mkUnit({ id: 'u-neither', serial: 'S-NONE', make: '', model: null }),
+  ] });
+  const h = fleetHtml();
+  t.includes(h, 'CAT XQ-500 · #S-BOTH', 'both set -> make model');
+  t.includes(h, 'CAT · #S-MAKE', 'model missing -> make alone, same shape');
+  t.includes(h, 'Technogen · #S-EMPTY', "empty-string model treated as absent — no trailing space, no ''-vs-null split");
+  t.includes(h, 'GEN · #S-NONE', 'neither -> GEN fallback');
+  t.excludes(h, 'CAT  ·', 'no double-space artifacts');
+};
