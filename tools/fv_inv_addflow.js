@@ -59,4 +59,23 @@ module.exports = async (app, t) => {
   app.fn.handleCode('ZZZZZZ');
   t.includes(app.document.querySelector('#sheet').innerHTML, 'Add asset',
     'no candidates -> straight to the add form as before');
+
+  t.group('klass lock: big iron exists only via the NES roster');
+  app.setState({ units: [mkUnit({ id: 'u-lock', serial: 'LOCKBIG1', klass: 'big' })],
+                 shows: [{ id: 'show-A', name: 'A' }] });
+  app.S.settings.techName = 'Mike R.';
+  app.fn.editUnit(null, 'BRANDNEW1');
+  const addForm = app.document.querySelector('#sheet').innerHTML;
+  t.excludes(addForm, 'data-v="big"', 'no Big iron toggle on the add form');
+  t.excludes(addForm, 'tseg', 'type control is static, not interactive');
+  t.includes(addForm, 'NES roster', 'the why is stated where the toggle used to be');
+  app.document.querySelector('#f_serial').value = 'BRANDNEW1';
+  app.fn.saveUnit('');
+  const created = app.S.units.find((u) => u.serial === 'BRANDNEW1');
+  t.ok(created && created.klass === 'small', 'in-app add always creates small iron (got ' + (created && created.klass) + ')');
+  app.fn.editUnit('u-lock');
+  t.includes(app.document.querySelector('#sheet').innerHTML, 'Big iron · NES roster', 'edit form displays locked type');
+  app.document.querySelector('#f_serial').value = 'LOCKBIG1';
+  app.fn.saveUnit('u-lock');
+  t.eq(app.S.units.find((u) => u.id === 'u-lock').klass, 'big', 'editing a big unit never flips klass');
 };

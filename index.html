@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-07-31 near-match -->
+<!-- fleetview build 2026-07-31 klass-lock -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -884,12 +884,12 @@ function saveJobMeta(unitId,sid){const u=unitById(unitId);if(!u)return;u.jobMeta
 function mapSetLoc(unitId){const u=unitById(unitId);if(!u)return;requireTech(()=>{toast('Getting location…');captureGPS(g=>{if(!g){toast('Location unavailable. Allow location on your phone');return;}S.movements.push({id:uid('mv'),unitId,fromType:u.locationType,fromId:u.locationId,toType:u.locationType,toId:u.locationId,techName:S.settings.techName,timestamp:now(),gps:g});u.updatedAt=now();save();toast('Pinned to your location (±'+g.acc+'m)');if(typeof TAB!=='undefined'&&TAB==='map')render();else renderUnit(unitId);});});}
 function capturePlacement(unitId){const u=unitById(unitId);if(!u)return;requireTech(()=>{toast('Getting location…');captureGPS(g=>{if(!g){toast('Location unavailable. Allow location on your phone');return;}S.movements.push({id:uid('mv'),unitId,fromType:u.locationType,fromId:u.locationId,toType:u.locationType,toId:u.locationId,techName:S.settings.techName,timestamp:now(),gps:g});u.updatedAt=now();save();renderUnit(unitId);toast('Placement captured (±'+g.acc+'m)');});});}
 /* ===== FORMS ===== */
-let segType='small',segStyle=null;
+let segStyle=null;
 function setFormGps(){const st=$('#f_gpsStatus');if(st)st.textContent='Getting location…';captureGPS(g=>{if(!g){if(st)st.textContent='Unavailable. Allow location access';toast('Location unavailable. Allow location on your phone');return;}formGps=g;if(st)st.textContent='✓ Set · '+g.lat+', '+g.lng+' (±'+g.acc+'m)';toast('Location set (±'+g.acc+'m)');});}
 function editUnit(id,prefillTag){const u=id?unitById(id):{};const isNew=!id;formGps=null;const _eg=id?unitGps(u):null;const gpsStat=_eg?('📍 '+_eg.lat+', '+_eg.lng):'No pin yet';
   const locOpts=[...S.shows.map(s=>`<option value="show:${s.id}" ${(currentShow()&&currentShow().id===s.id)?'selected':''}>${esc(s.name)}</option>`),...S.shops.map(s=>`<option value="shop:${s.id}">${esc(s.name)}</option>`)].join('');
   sheet(isNew?'Add asset':'Edit asset',`${isNew&&prefillTag?`<div class="banner">🆕 New asset <b>${esc(prefillTag)}</b>. Fill in once. It stays with this unit.</div>`:''}
-    <label class="fld"><span class="lb">Type</span><div class="segwrap" id="t_seg"><button type="button" data-v="small" class="${(u.klass!=='big')?'on':''}" style="${u.klass!=='big'?'background:var(--accent);color:#fff':''}" onclick="tseg(this)">Small iron</button><button type="button" data-v="big" class="${u.klass==='big'?'on':''}" style="${u.klass==='big'?'background:var(--accent);color:#fff':''}" onclick="tseg(this)">Big iron</button></div></label>
+    <label class="fld"><span class="lb">Type</span><div><span class="chip" style="font-size:12px;padding:6px 12px">${(isNew||u.klass!=='big')?'Small iron':'Big iron · NES roster'}</span></div>${isNew?'<p class="muted" style="font-size:11px;margin:6px 0 0">Big iron exists on the NES roster and arrives by import — it isn’t created here.</p>':''}</label>
     <label class="fld"><span class="lb">Serial #</span><input id="f_serial" value="${esc(u.serial||prefillTag||'')}" placeholder="e.g. A246B12359 or 1LS01712/14" autocapitalize="characters" autocorrect="off" spellcheck="false" style="text-transform:uppercase"/></label>
     <div class="grid2"><label class="fld"><span class="lb">Scan code (optional)</span><input id="f_tag" value="${esc(u.tagId||'')}" placeholder="QR/barcode, if any" autocapitalize="characters" autocorrect="off" spellcheck="false" style="text-transform:uppercase"/></label><label class="fld"><span class="lb">Weight (lb)</span><input id="f_weight" type="number" inputmode="decimal" value="${esc(u.weightLbs||'')}"/></label></div>
     <div class="grid2"><label class="fld"><span class="lb">Make</span><input id="f_make" value="${esc(u.make||'')}" placeholder="Cat, Cummins"/></label><label class="fld"><span class="lb">Model</span><input id="f_model" value="${esc(u.model||'')}" placeholder="XQ125"/></label></div>
@@ -910,15 +910,15 @@ function editUnit(id,prefillTag){const u=id?unitById(id):{};const isNew=!id;form
     <div class="card" style="padding:12px;margin:2px 0 10px"><div class="between"><span class="lb">Location pin (GPS)</span><span id="f_gpsStatus" class="muted" style="font-size:12px">${gpsStat}</span></div><button type="button" class="btn dark block" style="margin-top:9px" onclick="setFormGps()">📍 Set to my current location</button><p class="muted" style="font-size:11px;margin-top:7px">Drops a pin where you're standing. You can fine-tune it later on the map.</p></div>
     <label class="fld"><span class="lb">Notes</span><textarea id="f_notes">${esc(u.notes||'')}</textarea></label>
     <button class="btn primary block" onclick="saveUnit('${id||''}')">${isNew?'Add asset':'Save'}</button>${!isNew?`<button class="btn ghost block" style="margin-top:9px" onclick="confirmDeleteUnit('${id}')">Delete unit</button>`:''}`,stopScanner);
-  segType=u.klass==='big'?'big':'small';segStyle=engStyle(u);}
-function tseg(b){segType=b.dataset.v;document.querySelectorAll('#t_seg button').forEach(x=>{x.classList.remove('on');x.style.background='';x.style.color='';});b.classList.add('on');b.style.background='var(--accent)';b.style.color='#fff';const bf=$('#bigFields');if(bf)bf.style.display=segType==='big'?'block':'none';}
+  segStyle=engStyle(u);}
+
 function lsseg(b){segStyle=b.dataset.v==='12'?'12':'AB';document.querySelectorAll('#ls_seg button').forEach(x=>{x.classList.remove('on');x.style.background='';x.style.color='';});b.classList.add('on');b.style.background='var(--accent)';b.style.color='#fff';}
 function saveUnit(id){let ser=$('#f_serial').value.trim().toUpperCase();let tag=$('#f_tag').value.trim().toUpperCase();if(!ser&&!tag){ser='GEN-'+now().toString(36).slice(-5).toUpperCase();}const norm=x=>String(x||'').trim().toLowerCase();const clash=S.units.find(u=>{if(u.id===id)return false;const us=norm(u.serial),ut=norm(u.tagId);return (ser&&(us===norm(ser)||ut===norm(ser)))||(tag&&(us===norm(tag)||ut===norm(tag)));});if(clash){toast('That serial/code is already in the fleet. Search for it to move it onto this job.');return;}
   if(id&&isTwin(unitById(id))){const _ka=$('#f_kvaA')?num($('#f_kvaA').value):null,_kb=$('#f_kvaB')?num($('#f_kvaB').value):null;
     if(!(_ka>0)||!(_kb>0)){toast("Each engine needs its nameplate kVA.");return;}}
   requireTech(()=>{let u=id?unitById(id):null;const isNew=!u;if(isNew){u={id:uid('gen'),createdAt:now(),opStatus:'staged'};S.units.push(u);}
-    u.serial=ser;u.tagId=tag;u.klass=segType;u.weightLbs=num($('#f_weight').value);u.make=$('#f_make').value.trim();u.model=$('#f_model').value.trim();u.kw=num($('#f_kw').value);u.breakerSize=$('#f_breaker').value.trim();
-    if(segType==='big'){u.config=$('#f_config')?$('#f_config').value:'';u.trailer=$('#f_trailer')?$('#f_trailer').value.trim():'';}
+    u.serial=ser;u.tagId=tag;if(isNew)u.klass='small'; /* klass is locked: big iron exists only via the NES roster */u.weightLbs=num($('#f_weight').value);u.make=$('#f_make').value.trim();u.model=$('#f_model').value.trim();u.kw=num($('#f_kw').value);u.breakerSize=$('#f_breaker').value.trim();
+    if(u.klass==='big'){u.config=$('#f_config')?$('#f_config').value:'';u.trailer=$('#f_trailer')?$('#f_trailer').value.trim():'';}
     /* TwinPak conversion. kvaEach is the one required field in the app — a
        deliberate exception, because this is a low-frequency setup flow done while
        standing at the machine, and a load % divided by a number nobody read is the
