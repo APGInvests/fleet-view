@@ -208,7 +208,7 @@ Volt L-L / L-N, Amps L1/L2/L3, Hz, Load kW, Coolant temp, Oil psi, **Fuel psi (b
 - Every field is optional.
 
 ### Fleet
-The global registry — every asset the company owns, wherever it is. Search + filters. Sorted like the job list. Swipe left = **Delete from fleet** (confirm-gated). This is the *only* place delete lives.
+The global registry — every asset the company owns, wherever it is. Search + filters, plus **make chips derived from the data with counts** ('CAT · 82') — one tap narrows 153 units to a manufacturer; '' and null makes share one 'No make' chip (coalesce, never null-check). Sorted like the job list. **Card anatomy (2026-08-01):** headline is make **always** + model when known ('CAT XQ-500 · #X5M00212' — never model-or-make, which made identical manufacturers read differently), **kVA right-aligned under the status pill** so sizes line up in a scannable column even on unassigned units, and the **TWINPAK chip + per-engine meter-reading gap chips render here too** (this is the binding-pass progress surface, per §10 1b — it previously rendered only on job-detail cards). Deliberately NOT collapsible sections: drawers add a tap, hide units nobody knew to look for, and would trap down units inside groups instead of letting them sink to the visible bottom. Swipe left = **Delete from fleet** (confirm-gated). This is the *only* place delete lives.
 
 ### Map
 "This job / All locations" toggle. Clustered status-coloured pins + a venue marker. Marker popup is deliberately minimal: **area** (bold), model · #serial, status dot + label, then three actions — **Open**, **Move** (drag the pin), **📍 Set to my location**.
