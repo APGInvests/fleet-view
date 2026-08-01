@@ -1,12 +1,18 @@
 /**
  * fv_inv_placementphotos.js — standing invariants for placement photos.
  *
- * A placement photo documents how a unit sat on THIS job. It attaches to the
- * MOVEMENT record — born with it, never edited in (movements stay append-only)
- * — so it can't be overwritten, can't travel to the next show, and can't crowd
- * out the condition photos that live on the unit and DO travel. Uploads reuse
- * the Storage path (no base64 in rows — that debt is closed and stays closed),
- * under movements/<id>/<ms>-<uuid>.jpg so photos are timestamp-matchable.
+ * Shape (2026-08-01, v2): the movements table is a placement-EVENT log
+ * (capturePlacement/mapSetLoc/savePin already write rows where nothing moved).
+ * A placement photo is its own typed event — kind:'photo', gps:null, born with
+ * its photo, referencing the job through toType/toId like every other event.
+ * Two taps, two acts, each attributed to whoever actually did it.
+ *
+ * THE RULE (same family as "status is not placement"): a kind:'photo' row must
+ * never satisfy anything that means "the unit was observed here" — not
+ * unitGps, not recentDests, not freshness/staleness. The exclusion is by
+ * EXPLICIT kind guard, not by the gps:null field shape — coincidence standing
+ * in for a rule is the config==='TwinPak' trap. The adversarial tests below
+ * hand a photo event a GPS and a destination and require both to be ignored.
  */
 'use strict';
 module.exports = async (app, t) => {
@@ -17,38 +23,55 @@ module.exports = async (app, t) => {
     opStatus: 'running', locationType: 'show', locationId: 'show-A', photos: ['https://x/condition.jpg'],
     jobMeta: {}, updatedAt: 1 }, o);
 
-  t.group('placement photos: born on the movement, unit photos untouched');
+  t.group('placement photo: its own typed event, nothing else changes');
   app.setState({ units: [mkUnit({ id: 'u-pl' })], shows: [{ id: 'show-A', name: 'A' }] });
   app.S.settings.techName = 'Mike R.';
   const before = app.S.movements.length;
-  app.fn.capturePlacement('u-pl', D);
-  t.eq(app.S.movements.length, before + 1, 'capture creates a NEW movement (append-only intact)');
+  app.fn.addPlacementPhoto('u-pl', D);
+  t.eq(app.S.movements.length, before + 1, 'new row appended — movement rows never edited');
   const mv = app.S.movements[app.S.movements.length - 1];
-  t.deep(mv.photos, [D], 'photo rides on the movement record');
-  t.eq(mv.unitId, 'u-pl', 'attached to the right unit movement');
-  t.ok(mv.gps, 'GPS captured as before');
-  t.deep(app.S.units[0].photos, ['https://x/condition.jpg'], 'condition photos on the unit untouched');
+  t.eq(mv.kind, 'photo', "typed kind:'photo', a stated rule not a field shape");
+  t.deep(mv.photos, [D], 'born with its photo');
+  t.ok(mv.gps === null, 'claims no position');
+  t.eq(mv.toId, 'show-A', 'job-scoped through toId like every event');
+  const u = app.S.units[0];
+  t.eq(u.updatedAt, 1, 'unit row untouched — a photo mutates nothing about the asset');
+  t.deep(u.photos, ['https://x/condition.jpg'], 'condition photos untouched');
+  t.group('placement photo: capture stays a single instant act');
   app.fn.capturePlacement('u-pl');
-  t.ok(app.S.movements[app.S.movements.length - 1].photos == null, 'photo is optional — plain capture unchanged');
+  const cap = app.S.movements[app.S.movements.length - 1];
+  t.ok(cap.gps && cap.kind == null && cap.photos == null, 'plain capture: gps yes, no kind, no photo');
 
-  t.group('placement photos: flush uploads to movements/ path, timestamped, URL swapped');
+  t.group('placement photo: never "observed here" — adversarial, guards must be explicit');
+  app.setState({ units: [mkUnit({ id: 'u-adv' })],   // on show-A, running: owes checks
+                 shows: [{ id: 'show-A', name: 'A' }], shops: [] });
+  // hand the photo event everything the guards are supposed to ignore:
+  app.S.movements.push({ id: 'mv-adv', unitId: 'u-adv', fromType: 'show', fromId: 'show-A',
+    toType: 'show', toId: 'show-A', techName: 'Mike R.', timestamp: 9999999,
+    gps: { lat: 33.6, lng: -116.2, acc: 5 }, photos: [D], kind: 'photo' });
+  t.eq(app.fn.unitGps(app.S.units[0]), null, 'unitGps ignores a photo event even when it carries gps');
+  t.eq(app.fn.recentDests().length, 0, 'recentDests ignores a photo event even with a valid show destination');
+  t.eq(app.fn.lastCheckTs(app.S.units[0]), null, 'freshness: photo is not a check — last check stays never');
+  t.ok(app.fn.isStale(app.S.units[0]), 'staleness clock unmoved by a photo event');
+
+  t.group('placement photo: flush, round-trip, display');
+  app.setState({ units: [mkUnit({ id: 'u-fl' })], shows: [{ id: 'show-A', name: 'A' }] });
+  app.S.settings.techName = 'Mike R.';
+  app.fn.addPlacementPhoto('u-fl', D);
   app.live.SNAP = {}; app.SYNC_READY = true;
   app.supabaseCalls.length = 0;
   await app.fn.flush();
-  const up = app.supabaseCalls.find((c) => c.op === 'upload' && String(c.payload.path).indexOf('movements/') === 0);
-  t.ok(up, 'uploaded under movements/<id>/');
-  t.ok(up && /^movements\/[^/]+\/\d{13}-/.test(up.payload.path), 'filename carries ms timestamp for later matching');
+  const fmv = app.S.movements[app.S.movements.length - 1];
+  t.includes(fmv.photos[0], 'storage/v1/object/public/unit-photos/movements/', 'uploads via the Storage path, URL in the row');
   t.excludes(JSON.stringify(app.supabaseCalls.filter((c) => c.table === 'movements' && c.op === 'upsert')),
-    'data:image', 'no base64 persisted on movement rows');
-  t.includes(mv.photos[0], 'storage/v1/object/public/unit-photos/movements/', 'row now holds the URL');
-
-  t.group('placement photos: round-trip and display');
-  t.eq(app.fn.toRow('movements', mv).photos, mv.photos, 'photos mapped in MAPS (persists)');
-  t.deep(app.fn.fromRow('movements', app.fn.toRow('movements', mv)).photos, mv.photos, 'round-trips');
+    'data:image', 'no base64 persisted');
+  t.eq(app.fn.fromRow('movements', app.fn.toRow('movements', fmv)).kind, 'photo', 'kind round-trips (MAPS)');
   const pane = app.fn.paneMoves(app.S.units[0], 'A');
-  t.includes(pane, 'bigMovePhoto', 'placement pane history shows the photo');
-  t.includes(pane, 'Capture placement + photo', 'capture-with-photo entry point present');
-  t.includes(pane, 'not the asset', 'the stays-with-this-placement rule is stated on the surface');
+  t.includes(pane, '📷 Placement photo', 'history renders the event as a photo');
+  t.excludes(pane.split('📷 Placement photo')[1].split('</div>')[0], '→', 'never renders as a move');
+  t.includes(pane, 'Not a location update', 'the rule is stated on the capture surface');
+  t.includes(pane, 'btn ghost block" style="margin-top:8px" onclick="document.getElementById(\'plPhotoIn\')',
+    'photo action is visually distinct (ghost), not a twin of the primary capture');
   app.fn.openJobLog('show-A');
-  t.includes(app.document.querySelector('#sheet').innerHTML, 'bigMovePhoto', 'job log shows movement photos');
+  t.includes(app.document.querySelector('#sheet').innerHTML, '📷 Placement photo', 'job log labels it honestly');
 };
