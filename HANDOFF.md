@@ -83,6 +83,8 @@ MAPS = { units: { m: { appKey: 'db_col', ... }, dt: ['createdAt','updatedAt'] },
 
 > **If you add a field to a synced object you must add it to `MAPS`, or it will silently never persist.** This is the single easiest way to break this app.
 
+> **When a build needs more than one schema change, list them together and verify them together — one SQL batch, ending with a single `information_schema.columns` select that names every expected column.** Two separate gates across two conversations is how `movements.photos` got dropped while `movements.kind` got verified (2026-08-01). Cost: once the client mapped `photos`, **every movement upsert failed silently for ~14 hours** — the legacy flush console-warns and re-snapshots, so the rows were marked synced and permanently lost (last good movement 01:47, column created ~16:17). Unit location columns persisted (units upserts succeeded), so the damage is movement-history gaps and stale map pins for moves in that window — fix-forward is re-capturing placement on affected units, not reconstruction. Same audit also found `received_at` mapped as read-only on reports/issues/movements but existing only on `status_events` — harmless today (ro columns are never written; reads yield null and the tiebreak degrades to device time) but the same class of drift.
+
 **IDs.** `uid()` returns `crypto.randomUUID()`. All primary keys are UUIDs.
 
 **localStorage keys** (device-local, never synced): `fleetview_settings_v1` (UI settings), `fleetview_favs` (per-person starred jobs).
