@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-08-01 ack-flush -->
+<!-- fleetview build 2026-08-01 durable-cache -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -339,13 +339,36 @@ function mergeServerState(t,serverRows){
 async function loadAll(){for(const t of TABLES){const {data,error}=await sb.from(t).select('*');
   if(error){console.warn('load',t,error.message);continue;}
   mergeServerState(t,(data||[]).map(r=>fromRow(t,r)));}
-  updateSyncChip();}
+  updateSyncChip();persistCache();}
 let SNAP={};
 function snapshot(){SNAP={};TABLES.forEach(snapshotTable);}
 function snapshotTable(t){SNAP[t]={};S[t].forEach(o=>{SNAP[t][o.id]=JSON.stringify(toRow(t,o));});}
 let SYNC_FAILS={};
 let flushTimer=null,flushing=false;
 function scheduleFlush(){if(!SYNC_READY)return;clearTimeout(flushTimer);flushTimer=setTimeout(flush,450);}
+/* ===== DURABLE CACHE (plan 3.1) ===== */
+/* KV: IndexedDB key-value store; in-memory fallback keeps the harness zero-dep.
+   Persists S data tables + SNAP + DEAD + SYNC_LOST so queued work and quarantine
+   survive an app kill, and the app opens with last-known data offline. Same-origin
+   note: any sandbox copy must rename the 'fleetview' database (Pages project sites
+   share one origin — see the offline plan, Task 2.4). */
+const KV=(()=>{const mem=new Map();const useMem=(typeof indexedDB==='undefined');let dbp=null;
+  const open=()=>dbp||(dbp=new Promise((res,rej)=>{const q=indexedDB.open('fleetview',1);
+    q.onupgradeneeded=()=>q.result.createObjectStore('kv');
+    q.onsuccess=()=>res(q.result);q.onerror=()=>rej(q.error);}));
+  const tx=(mode,fn)=>open().then(d=>new Promise((res,rej)=>{const t=d.transaction('kv',mode);
+    const r=fn(t.objectStore('kv'));t.oncomplete=()=>res(r&&r.result);t.onerror=()=>rej(t.error);}));
+  return{get:k=>useMem?Promise.resolve(mem.get(k)):tx('readonly',st=>st.get(k)),
+    set:(k,v)=>useMem?(mem.set(k,v),Promise.resolve()):tx('readwrite',st=>st.put(v,k)),
+    del:k=>useMem?(mem.delete(k),Promise.resolve()):tx('readwrite',st=>st.del?st.del(k):st.delete(k)),
+    _mem:mem};})();
+let cacheTimer=null;
+function persistCache(){clearTimeout(cacheTimer);cacheTimer=setTimeout(()=>{const tables={};TABLES.forEach(t=>{tables[t]=S[t];});
+  KV.set('cache',{v:1,tables,snap:SNAP,dead:DEAD,lost:SYNC_LOST,currentShowId:S.currentShowId,savedAt:now()}).catch(()=>{});},800);}
+async function hydrateFromCache(){try{const c=await KV.get('cache');if(!c||c.v!==1)return false;
+  TABLES.forEach(t=>{if(Array.isArray(c.tables[t]))S[t]=c.tables[t];});
+  SNAP=c.snap||{};DEAD=c.dead||{};SYNC_LOST=c.lost||[];if(c.currentShowId)S.currentShowId=c.currentShowId;
+  updateSyncChip();return true;}catch(e){return false;}}
 /* RULE (§8.12): A WRITE THAT FAILS IS NEVER MARKED AS SYNCED — full ack-correct
    flush (plan 3.3). captureDiff() runs SYNCHRONOUSLY at entry and acks are written
    per-row from the CAPTURED serialization, so an edit landing mid-flight can never
@@ -388,7 +411,7 @@ async function flush(){if(!SYNC_READY||flushing)return;flushing=true;let netFail
       else dels.forEach(id=>{DEAD[deadKey(t,id)]={table:t,op:'delete',rowId:id,snapRs:SNAP[t]&&SNAP[t][id],error:String(error.message||error),ts:now()};if(SNAP[t])delete SNAP[t][id];});}
   }catch(e){netFail=true;console.warn('flush',e);}
   flushing=false;
-  const pend=dirtyCount();SYNC_FAILS=netFail?{'(pending)':pend}:{};updateSyncChip();
+  const pend=dirtyCount();SYNC_FAILS=netFail?{'(pending)':pend}:{};updateSyncChip();persistCache();
   if(netFail){clearTimeout(flushTimer);flushTimer=setTimeout(flush,30000);}
   else if(pend)scheduleFlush();}
 function updateSyncChip(){const el=$('#syncChip');if(!el)return;
@@ -420,8 +443,13 @@ function authSubmit(){if(authMode==='signup')doSignUp();else doSignIn();}
 function authMsg(m){const e=$('#au_msg');if(e)e.textContent=m||'';}
 async function doSignIn(){const em=($('#au_email').value||'').trim(),pw=$('#au_pass').value||'';if(!em||!pw){authMsg('Enter email and password');return;}authMsg('Signing in…');const {error}=await sb.auth.signInWithPassword({email:em,password:pw});if(error){authMsg(error.message);return;}boot();}
 async function doSignUp(){const em=($('#au_email').value||'').trim(),pw=$('#au_pass').value||'';const fn=($('#au_first').value||'').trim(),ln=($('#au_last').value||'').trim();if(!em||pw.length<6){authMsg('Enter email and a 6+ character password');return;}if(!fn){authMsg('Enter your first name');return;}const disp=fn+(ln?(' '+ln.charAt(0).toUpperCase()+'.'):'');authMsg('Creating account…');const {data,error}=await sb.auth.signUp({email:em,password:pw,options:{data:{name:disp,first:fn,last:ln}}});if(error){authMsg(error.message);return;}if(!(data&&data.session)){const r2=await sb.auth.signInWithPassword({email:em,password:pw});if(r2.error){authMsg('Account created. If confirmation is required, check your email, then Sign in.');return;}}boot();}
-async function doSignOut(){try{if(realtimeCh)sb.removeChannel(realtimeCh);}catch(e){}try{await sb.auth.signOut();}catch(e){}location.reload();}
-async function boot(){authMsg('Loading…');const {data:{session}}=await sb.auth.getSession();if(!session){showAuth();return;}USER=session.user;const nm=(USER.user_metadata&&USER.user_metadata.name)||'';S.settings.techName=nm||(USER.email?USER.email.split('@')[0]:'Tech');hideAuth();await loadAll();SYNC_READY=true;subscribeRealtime();TAB=(S.settings.homeTab==='fleet')?'fleet':'jobs';setActiveNav(TAB);render();if(!nm)setTimeout(promptName,500);}
+async function doSignOut(){try{await KV.del('cache');}catch(e){}try{if(realtimeCh)sb.removeChannel(realtimeCh);}catch(e){}try{await sb.auth.signOut();}catch(e){}location.reload();}
+async function boot(){authMsg('Loading…');const {data:{session}}=await sb.auth.getSession();if(!session){showAuth();return;}USER=session.user;const nm=(USER.user_metadata&&USER.user_metadata.name)||'';S.settings.techName=nm||(USER.email?USER.email.split('@')[0]:'Tech');hideAuth();
+  const cached=await hydrateFromCache();TAB=(S.settings.homeTab==='fleet')?'fleet':'jobs';setActiveNav(TAB);
+  if(cached){SYNC_READY=true;render();}          /* last-known data on screen immediately; loadAll merges over it */
+  await loadAll();SYNC_READY=true;subscribeRealtime();render();
+  if(!cached&&!S.units.length&&!S.shows.length)toast('No connection — will sync when you have signal');
+  if(!nm)setTimeout(promptName,500);}
 function promptName(){sheet('Your name',`<p class="muted" style="margin-top:0">This shows on everything you log. First name and last initial, like "Mike R.".</p><div class="grid2"><label class="fld"><span class="lb">First name</span><input id="pn_first"/></label><label class="fld"><span class="lb">Last name</span><input id="pn_last"/></label></div><button class="btn primary block" onclick="saveName()">Save</button>`);}
 async function saveName(){const fn=($('#pn_first').value||'').trim(),ln=($('#pn_last').value||'').trim();if(!fn){toast('Enter your first name');return;}const disp=fn+(ln?(' '+ln.charAt(0).toUpperCase()+'.'):'');try{await sb.auth.updateUser({data:{name:disp,first:fn,last:ln}});}catch(e){}if(USER){USER.user_metadata=USER.user_metadata||{};USER.user_metadata.name=disp;}S.settings.techName=disp;save();closeSheet();toast('Thanks, '+disp);render();}
 /* ===== HELPERS ===== */

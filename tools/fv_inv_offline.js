@@ -131,4 +131,27 @@ module.exports = async (app, t) => {
   await app.fn.flush();
   t.ok(app.supabaseCalls.some((c) => c.table === 'shops' && c.op === 'delete'), 'delete re-attempted after human retry');
   t.ok(!app.live.SNAP.shops['shop-g'], 'acked delete clears the SNAP entry');
+
+  t.group('durable cache: queue and quarantine survive an app kill');
+  app.setState({ units: [mkUnit({ id: 'u-cache', serial: 'CACHE1' })], shows: [{ id: 'show-A', name: 'A' }] });
+  app.SYNC_READY = true;
+  app.S.units[0].notes = 'unsaved edit';                       // dirty vs snapshot
+  app.live.DEAD = { 'units:u-dead': { table: 'units', op: 'upsert', rowId: 'u-dead', row: { id: 'u-dead' }, error: 'x', ts: 1 } };
+  app.live.SYNC_LOST = [{ table: 'units', serial: 'LOSTX', row: {}, ts: 1 }];
+  app.timers.length = 0;                       // drop stale captured timers from earlier
+  app.fn.persistCache(); app.flushTimers();    // groups (an old scheduled flush would ack the row)
+  await Promise.resolve();
+  const c = await app.live.KV.get('cache');
+  t.ok(c && c.v === 1, 'cache written');
+  t.includes(JSON.stringify(c.tables.units), 'unsaved edit', 'dirty S rows persisted');
+  t.ok(c.dead['units:u-dead'], 'quarantine persisted');
+  t.eq(c.lost.length, 1, 'overwritten list persisted');
+  t.excludes(JSON.stringify(c.snap.units || {}), 'unsaved edit', 'old SNAP persisted too — dirt is still dirt after restart');
+  app.setState({}); app.live.DEAD = {}; app.live.SYNC_LOST = [];
+  const hyd = await app.fn.hydrateFromCache();
+  t.ok(hyd, 'hydrate reports success');
+  t.eq(app.S.units[0].serial, 'CACHE1', 'cold boot is not an empty fleet');
+  t.ok(app.fn.dirtyCount() >= 1, 'the queued edit is STILL QUEUED after restart (rule 12 across restarts)');
+  t.ok(app.live.DEAD['units:u-dead'], 'quarantine restored');
+  t.eq(app.live.SYNC_LOST.length, 1, 'overwritten list restored');
 };
