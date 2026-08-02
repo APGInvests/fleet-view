@@ -85,6 +85,14 @@ module.exports = async (app, t) => {
   t.ok('show_days' in quick && 'pm_name' in quick && 'ces_job_number' in quick && 'tz' in quick, 'quick-add payload carries every shows column');
   t.eq(quick.show_days, null, 'quick-add show_days is null, not undefined');
 
+  t.group('job detail: the Edit entry point exists');
+  /* editShow's edit branch was unreachable for the app's whole life — every
+   * caller was id-less. Metadata that can only be set at creation is metadata
+   * that doesn't exist on live jobs, so the hook is a standing contract. */
+  app.fn.openJob(sh.id);
+  const detail = app.document.querySelector('#view').innerHTML;
+  t.includes(detail, `editShow('${sh.id}')`, 'job detail header carries an Edit hook for this job');
+
   t.group('tzGuess: known venue -> known zone, unknown -> null');
   t.eq(app.fn.tzGuess({ lng: -87.62 }), 'America/Chicago', 'Grant Park -> Central');
   t.eq(app.fn.tzGuess({ lng: -116.24 }), 'America/Los_Angeles', 'Indio -> Pacific');

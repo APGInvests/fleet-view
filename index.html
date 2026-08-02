@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-08-02 show-days -->
+<!-- fleetview build 2026-08-02 show-days-edit -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -843,7 +843,7 @@ function renderJobDetail(id){const s=showById(id);if(!s){jobView=null;return ren
   if(jobSearch){const q=jobSearch.toLowerCase();list=list.filter(u=>[u.tagId,u.serial,u.make,u.model,placeOf(u,id),assetLabel(u,id),(u.kw?u.kw+' kva':'')].some(x=>String(x||'').toLowerCase().includes(q)));}
   list=sortUnits(list.filter(u=>passFilter(u,jobFilter)));
   return `<button class="backbtn" onclick="go('jobs')">${IC.back} All jobs</button>
-    <div class="between"><h2 class="section" style="margin:0">${esc(s.name)}</h2></div>
+    <div class="between"><h2 class="section" style="margin:0">${esc(s.name)}</h2><button class="btn ghost sm" onclick="editShow('${id}')">Edit</button></div>
     <div class="hbar" style="margin:6px 0 12px"><span class="hchip">${esc(s.location||'')}${d?(' · Day '+d):''}</span>${h.down?`<span class="hchip alarm">${h.down} down</span>`:''}${h.overdue?`<span class="hchip warnh">${h.overdue} overdue</span>`:''}</div>
     <div class="row" style="margin-bottom:12px"><button class="btn ghost wide sm" onclick="openJobMap('${id}')">${IC.map} Map</button><button class="btn ghost wide sm" onclick="openJobLog('${id}')">${IC.log} Log</button><button class="btn dark wide sm" onclick="openReport('${id}')">${IC.report} Report</button></div>
     <div class="searchbar">${IC.search}<input placeholder="Search this job…" value="${esc(jobSearch)}" oninput="jobSearch=this.value;rerenderJob('${id}')"/></div>
