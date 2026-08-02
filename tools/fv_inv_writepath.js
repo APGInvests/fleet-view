@@ -149,5 +149,11 @@ module.exports = async (app, t) => {
   openEdit('u-m1');
   app.document.querySelector('#f_make').value = '';
   app.fn.saveUnit('u-m1');
-  t.eq(app.fn.unitById('u-m1').make, '', 'clearing make is allowed — nothing is required');
+  t.eq(app.fn.unitById('u-m1').make, null, 'clearing make stores null, never "" (fleet was nulled 2026-08-02)');
+  openEdit('u-m2');
+  app.document.querySelector('#f_make').value = '__other';
+  app.document.querySelector('#f_make_other').value = '   ';
+  app.fn.saveUnit('u-m2');
+  t.eq(app.fn.unitById('u-m2').make, null, 'Other with blank text also stores null');
+  t.eq(JSON.stringify(app.fn.makeOptions().filter((m) => !m.trim())), '[]', 'null/blank makes never become pick-list options');
 };

@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-08-02 write-path -->
+<!-- fleetview build 2026-08-02 make-null -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1200,7 +1200,7 @@ function saveUnit(id){let ser=$('#f_serial').value.trim().toUpperCase();let tag=
   if(id&&isTwin(unitById(id))){const _ka=$('#f_kvaA')?num($('#f_kvaA').value):null,_kb=$('#f_kvaB')?num($('#f_kvaB').value):null;
     if(!(_ka>0)||!(_kb>0)){toast("Each engine needs its nameplate kVA.");return;}}
   requireTech(()=>{let u=id?unitById(id):null;const isNew=!u;if(isNew){u={id:uid('gen'),createdAt:now(),opStatus:'staged'};S.units.push(u);}
-    u.serial=ser;u.tagId=tag;if(isNew)u.klass='small'; /* klass is locked: big iron exists only via the NES roster */u.weightLbs=num($('#f_weight').value);const _mkv=$('#f_make').value;u.make=(_mkv==='__other')?$('#f_make_other').value.trim():_mkv;u.model=$('#f_model').value.trim();u.kw=num($('#f_kw').value);u.breakerSize=$('#f_breaker').value.trim();
+    u.serial=ser;u.tagId=tag;if(isNew)u.klass='small'; /* klass is locked: big iron exists only via the NES roster */u.weightLbs=num($('#f_weight').value);const _mkv=$('#f_make').value;u.make=((_mkv==='__other')?$('#f_make_other').value.trim():_mkv)||null;/* no make = null, never '' — Andy nulled the empty strings fleet-wide 2026-08-02 */u.model=$('#f_model').value.trim();u.kw=num($('#f_kw').value);u.breakerSize=$('#f_breaker').value.trim();
     if(u.klass==='big'){u.config=$('#f_config')?$('#f_config').value:'';u.trailer=$('#f_trailer')?$('#f_trailer').value.trim():'';}
     /* TwinPak conversion. kvaEach is the one required field in the app — a
        deliberate exception, because this is a low-frequency setup flow done while
