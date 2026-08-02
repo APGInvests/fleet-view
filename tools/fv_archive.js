@@ -12,6 +12,7 @@
  *   FV_EMAIL=... FV_PASSWORD=... node tools/fv_archive.js --show "Lollapalooza"
  *   FV_EMAIL=... FV_PASSWORD=... node tools/fv_archive.js --show-id <uuid>
  *   FV_EMAIL=... FV_PASSWORD=... node tools/fv_archive.js --list
+ *   node tools/fv_archive.js --rebuild <dir>   (offline; recompute timeline from frozen data)
  *   node tools/fv_archive.js --selftest        (offline; no credentials needed)
  *
  * Options: --out <dir> (default archive/). FV_ANON_KEY / FV_URL override the
@@ -48,7 +49,7 @@ const path = require('path');
 
 const URLB = process.env.FV_URL || 'https://eujgglfcpdfgskyqfggg.supabase.co';
 const ANON = process.env.FV_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1amdnbGZjcGRmZ3NreXFmZ2dnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1ODI4MDksImV4cCI6MjEwMDE1ODgwOX0.0OCf7DeBOeaU3WgihQ2E-cSQ7WdUFPy7DsQJ_2X_8xc';
-const TOOL = 'fv_archive.js v1';
+const TOOL = 'fv_archive.js v2';   // v2: timeline.md + timeline.csv + --rebuild
 const TABLES = ['shops', 'shows', 'units', 'reports', 'issues', 'movements', 'status_events'];
 const PAGE = 1000;           // Supabase REST returns at most 1000 rows per request
 const PHOTO_TIMEOUT_MS = 20000;
@@ -152,6 +153,215 @@ function evidenceWindow(showId, reports, issues, movements) {
 function gpsParts(g) {
   if (!g || typeof g !== 'object') return { lat: null, lng: null, acc: null };
   return { lat: g.lat != null ? g.lat : null, lng: g.lng != null ? g.lng : null, acc: g.acc != null ? g.acc : null };
+}
+
+/* ---------------------------------------------------------------- timeline */
+
+/* Every `ts` is device time AT LOG TIME, not when the thing happened in the
+ * field. `received_at` only became real when the column landed — every earlier
+ * row carries the ALTER's backfill timestamp, so latency analysis is only valid
+ * from this moment on. */
+const RECEIVED_AT_VALID_FROM = '2026-08-01T16:29:00Z';
+
+/* "Sustained logging" = the first pair of consecutive days each carrying at
+ * least this many logged events. On the 2026 shows, everything before that pair
+ * is the app's own adoption ramp — the tool did not exist yet or was not yet in
+ * crew use — and the timeline must not read that silence as site inactivity. */
+const ADOPTION_MIN_EVENTS = 5;
+
+/* Nameplate kVA (units.kw is kVA — legacy name). TwinPak: sum the engines that
+ * are not toggled off; fall back to the flat rating if the json carries none. */
+function kvaOfUnit(u) {
+  if (!u) return 0;
+  if (u.engines && typeof u.engines === 'object') {
+    let t = 0;
+    for (const e of ['A', 'B']) {
+      const m = u.engines[e];
+      if (m && typeof m === 'object' && !m.off && m.kvaEach) t += Number(m.kvaEach) || 0;
+    }
+    if (t) return t;
+  }
+  return Number(u.kw) || 0;
+}
+
+/* One row per show-local calendar day. "Placed" is a state machine per unit —
+ * first arrival while not on site — never a raw movement-row count: photo rows
+ * (kind='photo') and same-location pins document a unit, they don't move it,
+ * and a unit re-placed after leaving counts again. Departures subtract from the
+ * running kVA-on-site figure; if that figure goes negative, arrivals are
+ * missing (the 2026-08-01 outage class) and the report says so. */
+function buildTimeline(show, scoped, notes, win) {
+  const tz = show.tz || 'America/Chicago';
+  const dayKey = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: tz });
+
+  const blank = () => ({ placed: 0, kvaPlaced: 0, departed: 0, kvaDeparted: 0, checks: 0, checksStamped: 0,
+    checksInferred: 0, issues: 0, run: 0, down: 0, moveRows: 0, events: 0 });
+  const days = new Map();
+  const day = (k) => { if (!days.has(k)) days.set(k, blank()); return days.get(k); };
+
+  const real = scoped.movements.filter((m) => m.kind !== 'photo');
+  const photoRows = scoped.movements.length - real.length;
+  let pinRows = 0;
+
+  const byUnit = new Map();
+  for (const m of real) {
+    if (!byUnit.has(m.unit_id)) byUnit.set(m.unit_id, []);
+    byUnit.get(m.unit_id).push(m);
+  }
+  for (const list of byUnit.values()) {
+    list.sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+    let on = false;
+    for (const m of list) {
+      const toShow = m.to_type === 'show' && m.to_id === show.id;
+      const fromShow = m.from_type === 'show' && m.from_id === show.id;
+      if (toShow && fromShow) { pinRows++; continue; }          // pin: locates, never arrives
+      const kva = kvaOfUnit(scoped.unitsById.get(String(m.unit_id)));
+      if (toShow && !on) { on = true; const d = day(dayKey(m.ts)); d.placed++; d.kvaPlaced += kva; }
+      else if (fromShow && !toShow) { on = false; const d = day(dayKey(m.ts)); d.departed++; d.kvaDeparted += kva; }
+    }
+  }
+  for (const m of scoped.movements) { const d = day(dayKey(m.ts)); d.moveRows++; d.events++; }
+  for (const r of scoped.checks) {
+    const d = day(dayKey(r.ts)); d.checks++; d.events++;
+    if (r.show_id === show.id) d.checksStamped++; else d.checksInferred++;
+  }
+  for (const i of scoped.issues) { const d = day(dayKey(i.ts)); d.issues++; d.events++; }
+  for (const e of scoped.statusEvents) {
+    const d = day(dayKey(e.ts)); d.events++;
+    if (e.status === 'running') d.run++; else if (e.status === 'down') d.down++;
+  }
+
+  const sd = Array.isArray(show.show_days) && show.show_days.length ? [...show.show_days].sort() : null;
+  const keys = [...days.keys()].sort();
+  if (!keys.length && !sd) return null;
+
+  /* continuous calendar range = union of activity span and show_days span;
+   * start_date is deliberately NOT a range bound — a contract date ten quiet
+   * days early (Lollapalooza) would pad the table with zero rows. */
+  const bounds = [...keys, ...(sd || [])].sort();
+  const lo = bounds[0], hi = bounds[bounds.length - 1];
+  const range = [];
+  for (let t = Date.parse(lo + 'T12:00:00Z'); range.length < 400; t += 86400e3) {
+    const k = new Date(t).toISOString().slice(0, 10);
+    range.push(k);
+    if (k === hi) break;
+  }
+
+  const dayN = (k) => show.start_date
+    ? Math.round((Date.parse(k + 'T12:00:00Z') - Date.parse(show.start_date + 'T12:00:00Z')) / 86400e3) + 1 : null;
+  const phase = (k) => {
+    if (!sd) return null;
+    if (k < sd[0]) return 'load-in';
+    if (sd.includes(k)) return 'show';
+    if (k > sd[sd.length - 1]) return 'load-out';
+    return 'dark';
+  };
+
+  const firstActivity = keys[0] || null;
+  let sustainedFrom = null;
+  for (let i = 0; i < range.length - 1; i++) {
+    const a = days.get(range[i]), b = days.get(range[i + 1]);
+    if (a && b && a.events >= ADOPTION_MIN_EVENTS && b.events >= ADOPTION_MIN_EVENTS) { sustainedFrom = range[i]; break; }
+  }
+  if (!sustainedFrom) sustainedFrom = firstActivity;
+  const ramp = !!(firstActivity && sustainedFrom && firstActivity < sustainedFrom);
+
+  let kvaOnSite = 0, wentNegative = false;
+  const rows = range.map((k) => {
+    const d = days.get(k) || blank();
+    kvaOnSite += d.kvaPlaced - d.kvaDeparted;
+    if (kvaOnSite < -0.001) wentNegative = true;
+    return Object.assign({ date: k, dayN: dayN(k), phase: phase(k),
+      pre: !!(sustainedFrom && k < sustainedFrom), kvaOnSite: Math.round(kvaOnSite * 10) / 10 }, d);
+  });
+
+  const csv = toCsv(
+    ['date', 'day_n', 'phase', 'pre_sustained_logging', 'units_placed', 'kva_placed', 'units_departed', 'kva_departed',
+      'kva_on_site_eod', 'checks', 'checks_stamped', 'checks_window_inferred', 'issues_opened',
+      'status_running_events', 'status_down_events', 'movement_rows'],
+    rows.map((r) => [r.date, r.dayN ?? '', r.phase ?? '', r.pre ? 'yes' : '', r.placed, Math.round(r.kvaPlaced),
+      r.departed, Math.round(r.kvaDeparted), r.kvaOnSite, r.checks, r.checksStamped, r.checksInferred,
+      r.issues, r.run, r.down, r.moveRows]));
+
+  /* ---- cadence, computed not narrated ---- */
+  const placedDays = rows.filter((r) => r.placed > 0);
+  const totalPlaced = rows.reduce((n, r) => n + r.placed, 0);
+  const totalKva = rows.reduce((n, r) => n + r.kvaPlaced, 0);
+  const peak = placedDays.reduce((b, r) => (!b || r.kvaPlaced > b.kvaPlaced) ? r : b, null);
+  const firstRun = rows.find((r) => r.run > 0);
+  const firstDep = peak ? rows.find((r) => r.departed > 0 && r.date >= peak.date) : null;
+  const dayDiff = (a, b) => Math.round((Date.parse(b + 'T12:00:00Z') - Date.parse(a + 'T12:00:00Z')) / 86400e3);
+  const cadence = [];
+  if (placedDays.length) {
+    cadence.push(`${totalPlaced} unit(s), ${Math.round(totalKva)} kVA placed across ${placedDays.length} delivery day(s), ${placedDays[0].date} → ${placedDays[placedDays.length - 1].date}.`);
+    if (peak && placedDays.length > 1) {
+      const adv = placedDays.filter((r) => r.date < peak.date);
+      if (adv.length) cadence.push(`Advance load from ${adv[0].date} (${adv.reduce((n, r) => n + r.placed, 0)} unit(s), ${Math.round(adv.reduce((n, r) => n + r.kvaPlaced, 0))} kVA); main load-in ${peak.date} (${peak.placed} unit(s), ${Math.round(peak.kvaPlaced)} kVA — ${Math.round(peak.kvaPlaced / totalKva * 100)}% of the show's power).`);
+      else cadence.push(`Main load-in ${peak.date} (${peak.placed} unit(s), ${Math.round(peak.kvaPlaced)} kVA — ${Math.round(peak.kvaPlaced / totalKva * 100)}% of the show's power).`);
+    }
+    if (firstRun && peak) cadence.push(`First running status logged ${firstRun.date}` + (firstRun.date >= peak.date ? ` — ${dayDiff(peak.date, firstRun.date)} day(s) after main load-in.` : '.'));
+    if (firstDep) cadence.push(`Load-out (first logged departure after peak) began ${firstDep.date}.`);
+  }
+
+  /* ---- caveats: generated from the data, so future runs caveat themselves ---- */
+  const caveats = [
+    'Every timestamp is when a tech LOGGED the entry, not when the truck arrived or the work happened. ' +
+      'Activity is dated by logging time; a burst of catch-up logging lands on the day of the burst.',
+  ];
+  if (ramp) {
+    caveats.push(`Sustained logging begins ${sustainedFrom} (first pair of consecutive days with ≥${ADOPTION_MIN_EVENTS} logged events each); ` +
+      `first logged activity is ${firstActivity}. Rows before ${sustainedFrom} are marked † — on the 2026 shows this early sparsity is the app's own adoption ramp ` +
+      '(the tool did not exist or was not yet in crew use), NOT site inactivity. Read pre-† counts as a floor on what happened, never as cadence.');
+  } else if (firstActivity) {
+    caveats.push(`Sustained logging from first activity (${firstActivity}) — no adoption ramp detected by the ≥${ADOPTION_MIN_EVENTS}-events-on-consecutive-days rule.`);
+  }
+  if (!sd) caveats.push('No show_days set on this job — phases (load-in / show / dark / load-out) are unavailable. Set the show days in the app and re-run the archive.');
+  if (!show.start_date) caveats.push('No start_date on this job — day numbers are unavailable; rows are anchored to first logged activity.');
+  if (!show.tz) caveats.push(`Time zone: show.tz is not set; days are bucketed in the fallback zone ${tz}. If the show ran elsewhere, day boundaries may be shifted.`);
+  else caveats.push(`Days are bucketed in ${tz} (show-local).`);
+  if (win && win.start != null && iso(win.start) < RECEIVED_AT_VALID_FROM) {
+    caveats.push(`received_at is only meaningful from ${RECEIVED_AT_VALID_FROM} (the column's ALTER backfilled everything earlier) — ` +
+      'do not compute logging latency for rows before that moment.');
+  }
+  if (photoRows || pinRows) caveats.push(`Excluded from placement counts: ${photoRows} placement-photo row(s) and ${pinRows} same-location pin row(s) — they document units, they do not move them.`);
+  if (wentNegative) caveats.push('kVA-on-site goes NEGATIVE at some point: departures were logged for arrivals that never were (lost or never-logged movement writes). Treat on-site totals as a floor.');
+  caveats.push(`Counts end at the archive's evidence window (${iso(win && win.end)}); re-run the archive after load-out to capture the tail.`);
+  caveats.push('status_running/down_events count TRANSITION events, which are sparse — they are not "units running that day".');
+  for (const n of notes || []) caveats.push(n);
+
+  const fmtRow = (r) => `| ${r.date}${r.pre ? ' †' : ''} | ${r.dayN ?? ''} | ${r.phase ?? ''} | ${r.placed || ''} | ${r.kvaPlaced ? Math.round(r.kvaPlaced) : ''} | ${r.kvaOnSite || ''} | ${r.checks || ''} | ${r.issues || ''} | ${r.run || ''} | ${r.down || ''} |`;
+  const md = `# Timeline — ${show.name}
+
+One row per show-local day (${tz}). This is the crew's notepad read back: what got
+logged, when. It is a record of logging, which is a floor on the record of work —
+see the caveats before quoting any number.
+
+## Cadence
+
+${cadence.length ? cadence.map((s) => '- ' + s).join('\n') : '- No placements logged inside this archive.'}
+
+## Day by day
+
+| Date | Day | Phase | Placed | kVA placed | kVA on site | Checks | Issues | Run evts | Down evts |
+|---|---|---|---|---|---|---|---|---|---|
+${rows.map(fmtRow).join('\n')}
+${ramp ? '\n† pre-sustained-logging: the app was not yet in crew use — a floor, not a cadence.\n' : ''}
+## How to read this
+
+${caveats.map((c) => '- ' + c).join('\n')}
+`;
+
+  const meta = {
+    tz_used: tz, tz_source: show.tz ? 'show.tz' : 'fallback',
+    days: rows.length, first_activity: firstActivity,
+    sustained_logging_from: sustainedFrom,
+    adoption_rule: `first pair of consecutive days with >=${ADOPTION_MIN_EVENTS} logged events each`,
+    adoption_ramp_detected: ramp,
+    phases_available: !!sd, day_numbers_available: !!show.start_date,
+    excluded_rows: { placement_photos: photoRows, same_location_pins: pinRows },
+    units_placed_total: totalPlaced, kva_placed_total: Math.round(totalKva),
+  };
+  return { rows, csv, md, meta };
 }
 
 /* ---------------------------------------------------------------- REST layer */
@@ -394,8 +604,16 @@ async function archiveShow(show, all, totals, outRoot) {
     notes.push('job_meta verification: effectively UNPOPULATED fleet-wide (no names, no areas) — roster still counts its keys as evidence, but placement columns are empty.');
   }
 
+  /* ---- timeline: delivery cadence per show-local day ---- */
+  const tl = buildTimeline(show, { movements, checks, issues, statusEvents, unitsById }, notes, win);
+  if (tl) {
+    fs.writeFileSync(path.join(dir, 'data', 'csv', 'timeline.csv'), tl.csv);
+    fs.writeFileSync(path.join(dir, 'timeline.md'), tl.md);
+  }
+
   const manifest = {
     tool: TOOL, generated_at: new Date().toISOString(), read_only: 'this tool only issues GETs',
+    timeline: tl ? tl.meta : null,
     show, evidence_window: { start: iso(win.start), end: iso(win.end) },
     max_source_row_timestamp: iso(maxTs),
     source_table_totals: totals,
@@ -425,6 +643,8 @@ Show: **${show.name}** (id \`${show.id}\`) · evidence window ${iso(win.start)} 
 This archive is self-contained. \`data/*.json\` holds rows exactly as the backend
 returned them (snake_case); \`data/csv/\` holds the same data flattened for a
 spreadsheet. Photos are real files under \`photos/\`, indexed in \`photos/index.csv\`.
+\`timeline.md\` (and \`data/csv/timeline.csv\`) is the show's day-by-day delivery
+cadence — read its caveats section before quoting any number from it.
 
 ## Read these before interpreting anything
 
@@ -521,6 +741,54 @@ function selftest() {
   t('name lookup substring', sel.length === 1 && sel[0].id === 'a');
   t('id lookup', selectShows([{ id: 'a' }], { showId: 'a' }).length === 1);
 
+  /* ---- timeline ---- */
+  t('kva flat', kvaOfUnit({ kw: 100 }) === 100);
+  t('kva twin sums live engines', kvaOfUnit({ kw: 80, engines: { A: { kvaEach: 50 }, B: { kvaEach: 50, off: true } } }) === 50);
+  t('kva twin empty json falls back', kvaOfUnit({ kw: 80, engines: {} }) === 80);
+
+  const tShow = { id: 's1', name: 'Fixture Fest', start_date: '2026-07-01', tz: 'America/Chicago',
+    show_days: ['2026-07-04', '2026-07-05', '2026-07-11', '2026-07-12'] };
+  const tUnits = new Map([['u1', { id: 'u1', kw: 100 }], ['u2', { id: 'u2', kw: 80, engines: { A: { kvaEach: 50 }, B: { kvaEach: 50 } } }]]);
+  const mv = (unit_id, ts, from, to, kind) => ({ unit_id, ts, kind: kind || null,
+    from_type: from[0], from_id: from[1], to_type: to[0], to_id: to[1] });
+  const tMoves = [
+    // 03:00Z = 22:00 CDT the previous evening — the tz-bucketing case
+    mv('u1', '2026-07-02T03:00:00Z', ['shop', 'p1'], ['show', 's1']),
+    mv('u1', '2026-07-02T15:00:00Z', ['show', 's1'], ['show', 's1']),            // pin — excluded
+    mv('u1', '2026-07-02T16:00:00Z', ['show', 's1'], ['show', 's1'], 'photo'),   // photo — excluded
+    mv('u2', '2026-07-03T15:00:00Z', ['shop', 'p1'], ['show', 's1']),
+    mv('u1', '2026-07-13T15:00:00Z', ['show', 's1'], ['shop', 'p1']),            // departs...
+    mv('u1', '2026-07-14T15:00:00Z', ['shop', 'p1'], ['show', 's1']),            // ...and returns: placed again
+  ];
+  const chk = (ts) => ({ unit_id: 'u1', show_id: 's1', ts });
+  const tChecks = [];
+  for (let i = 0; i < 6; i++) tChecks.push(chk(`2026-07-03T1${i}:30:00Z`));
+  for (let i = 0; i < 5; i++) tChecks.push(chk(`2026-07-04T1${i}:30:00Z`));
+  const tStatus = [{ unit_id: 'u1', status: 'running', ts: '2026-07-05T18:00:00Z' }];
+  const tl = buildTimeline(tShow, { movements: tMoves, checks: tChecks, issues: [], statusEvents: tStatus,
+    unitsById: tUnits }, ['fixture note'], { start: Date.parse('2026-07-01T00:00:00Z'), end: Date.parse('2026-07-14T00:00:00Z') });
+  const row = (d) => tl.rows.find((r) => r.date === d);
+  t('tz bucketing: 03:00Z arrival lands the previous Chicago day', row('2026-07-01').placed === 1 && row('2026-07-02').placed === 0);
+  t('pins and photos excluded from placement', tl.meta.excluded_rows.same_location_pins === 1 && tl.meta.excluded_rows.placement_photos === 1);
+  t('day numbers anchor to start_date', row('2026-07-01').dayN === 1 && row('2026-07-14').dayN === 14);
+  t('phase: before first show day is load-in', row('2026-07-03').phase === 'load-in');
+  t('phase: listed day is show', row('2026-07-04').phase === 'show' && row('2026-07-12').phase === 'show');
+  t('phase: gap inside the list is dark', row('2026-07-07').phase === 'dark');
+  t('phase: after last show day is load-out', row('2026-07-13').phase === 'load-out');
+  t('re-arrival after departure counts again', row('2026-07-14').placed === 1 && row('2026-07-13').departed === 1);
+  t('kva on site: 100+100-100+100', row('2026-07-14').kvaOnSite === 200);
+  t('continuous range, one row per day', tl.rows.length === 14);
+  t('sustained logging from the 07-03/07-04 pair', tl.meta.sustained_logging_from === '2026-07-03' && tl.meta.adoption_ramp_detected === true);
+  t('pre-sustained rows flagged', row('2026-07-01').pre === true && row('2026-07-03').pre === false);
+  t('csv has header + one line per day', tl.csv.trim().split('\n').length === 15);
+  t('caveats carry the pass-through note', tl.md.includes('fixture note'));
+  t('caveats explain the dagger', tl.md.includes('adoption ramp'));
+  t('cadence day arithmetic never NaN', !tl.md.includes('NaN'));
+  t('run event counted on its day', row('2026-07-05').run === 1);
+  t('no show_days -> phases degrade, timeline still renders',
+    buildTimeline({ id: 's1', name: 'X' }, { movements: tMoves, checks: [], issues: [], statusEvents: [], unitsById: tUnits },
+      [], { start: null, end: null }).rows.every((r) => r.phase === null));
+
   if (process.exitCode) { console.error('SELFTEST FAILED'); process.exit(1); }
   console.log('selftest OK');
 }
@@ -532,9 +800,34 @@ function selftest() {
   const opt = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : null; };
   if (argv.includes('--selftest')) return selftest();
 
+  /* --rebuild <archiveDir>: recompute the DERIVED outputs (timeline) from an
+   * existing archive's frozen data/*.json — offline, no credentials, and by
+   * definition unable to touch Supabase. The raw rows are never rewritten. */
+  const rb = opt('--rebuild');
+  if (rb) {
+    const dir = path.resolve(rb);
+    const rd = (f) => JSON.parse(fs.readFileSync(path.join(dir, 'data', f), 'utf8'));
+    const show = rd('show.json');
+    const unitsById = new Map(rd('units.json').map((u) => [String(u.id), u]));
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+    const win = { start: Date.parse(manifest.evidence_window.start) || null, end: Date.parse(manifest.evidence_window.end) || null };
+    const tl = buildTimeline(show, { movements: rd('movements.json'), checks: rd('checks.json'),
+      issues: rd('issues.json'), statusEvents: rd('status_events.json'), unitsById },
+    manifest.data_quality_notes || [], win);
+    if (!tl) { console.error('nothing to draw: no events and no show_days'); process.exit(1); }
+    fs.writeFileSync(path.join(dir, 'data', 'csv', 'timeline.csv'), tl.csv);
+    fs.writeFileSync(path.join(dir, 'timeline.md'), tl.md);
+    manifest.timeline = tl.meta;
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+    console.log(`timeline rebuilt for "${show.name}" -> ${path.join(dir, 'timeline.md')} ` +
+      `(${tl.meta.days} day rows, phases ${tl.meta.phases_available ? 'on' : 'OFF — no show_days'}, ` +
+      `sustained logging from ${tl.meta.sustained_logging_from})`);
+    return;
+  }
+
   const opts = { show: opt('--show'), showId: opt('--show-id'), out: opt('--out') || path.join(__dirname, '..', 'archive') };
   if (!argv.includes('--list') && !opts.show && !opts.showId) {
-    console.error('usage: fv_archive.js --show <name> | --show-id <id> | --list | --selftest  [--out dir]');
+    console.error('usage: fv_archive.js --show <name> | --show-id <id> | --list | --rebuild <archiveDir> | --selftest  [--out dir]');
     process.exit(1);
   }
 
