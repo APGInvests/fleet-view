@@ -196,6 +196,8 @@ On a **TwinPak** the single "Log check / Flag issue" pair on unit detail becomes
 ### Jobs
 List with search (name/location), per-person favorites (star pins to top), and health chips (unit count, down, overdue, last activity). Swipe left = **Delete job** — *refused while the job still has units on it*. Swipe right = that job's map.
 
+**Job metadata (shipped 2026-08-02, `show-days`).** The New/Edit job sheet carries, all optional: start date (defined as *first planned CES on-site day* going forward — the two 2026 archived shows keep their contract-date values, see the archive notes), **show days** (a hand-rolled month-grid multi-select calendar — the actual days the show runs, dark days simply unselected; a two-weekend run is eight dates), project manager, CES job #, and time zone (4-zone picker; blank = derived from the venue pin's longitude via `tzGuess`, null when there's no pin — never a fabricated default). Schema: `shows.show_days` (jsonb, sorted deduped ISO-date array, **null when empty, never `[]`**), `pm_name`, `ces_job_number`, `tz` (text), `archived_at` (timestamptz, reserved for the archive button) — one migration, run and verified in `information_schema` 2026-08-02 *before* the client mapped the columns (§8 rule 11a / the movements.photos lesson). Phases are **arithmetic, not a feature**: before the first show day = load-in, in the list = show, gaps inside the list = dark, after the last = load-out; no button, no completion state, nothing required in any tech flow. `fv_inv_showmeta.js` guards the round-trip, sort/dedup, and null-not-empty-string contracts.
+
 ### Job detail
 Header buttons: Map · Log · Report. Search + filter chips (All / Big iron / Small iron / Down / Low fuel / Service). Unit cards sorted by **kVA ascending, with hard-down units forced to the bottom**, tiebreaking on the **job label when set, else serial** (same-kVA units are indistinguishable by serial alone) (crews doing rounds need runnable units on top; a known-broken unit is noise). Card swipe left = **Off job**; swipe right = its map pin.
 
@@ -329,7 +331,7 @@ These were each learned the hard way, several from production bugs.
 
 ## 9. Ship-verify loop (follow this for every change)
 
-Two guards stand behind every deploy, and they are complementary, not interchangeable. The **standing invariant suite** — 680 assertions as of 2026-08-01, `tools/fv_smoke.js` plus every `tools/fv_inv_*.js`, run automatically by preflight, which refuses to clear a broken build — protects the contracts someone has already encoded. The **loop below** catches what no assertion watches yet: the surface you just built, deploy and caching problems, real-device behavior. A green suite is not "shipped", and this discipline without the suite is what let contract regressions slip before the suite existed. Do both.
+Two guards stand behind every deploy, and they are complementary, not interchangeable. The **standing invariant suite** — 750 assertions as of 2026-08-02, `tools/fv_smoke.js` plus every `tools/fv_inv_*.js`, run automatically by preflight, which refuses to clear a broken build — protects the contracts someone has already encoded. The **loop below** catches what no assertion watches yet: the surface you just built, deploy and caching problems, real-device behavior. A green suite is not "shipped", and this discipline without the suite is what let contract regressions slip before the suite existed. Do both.
 
 1. **Read the real current code** for the lines you're changing. Never edit from memory — the file drifts.
 2. Make **one logical change**.
@@ -345,7 +347,7 @@ Two guards stand behind every deploy, and they are complementary, not interchang
    ```bash
    python3 tools/fv_deploy.py preflight -m "what changed"
    ```
-   Auto-loads every `fv_inv_*.js` group, prints `RESULT: PASS (680/680)` (count as of 2026-08-01) and refuses to clear the build on any failure. (Suite only, no preflight wrapper: `node tools/fv_smoke.js index.html tools/fv_inv_*.js`.)
+   Auto-loads every `fv_inv_*.js` group, prints `RESULT: PASS (750/750)` (count as of 2026-08-02) and refuses to clear the build on any failure. (Suite only, no preflight wrapper: `node tools/fv_smoke.js index.html tools/fv_inv_*.js`.)
 6. **Manual regression sweep — narrowed 2026-08-01 to what the suite does not render.** The suite already exercises `renderFleet`, `renderAlerts`, `unitCard`, `paneVitals`, `paneIssues`, `paneService` and `paneMoves` against populated and edge-field fixtures (`fv_inv_fleetcard.js`, `fv_inv_alerts.js`, `fv_inv_bigiron.js`, `fv_inv_status.js`, `fv_inv_placementphotos.js`). Still swept **by hand, in the harness or browser**, because no assertion renders them:
    - `renderJobsList`, `renderJobDetail`, `renderMapScreen`, `paneInfo` — all three states (**empty**, **populated**, **edge**);
    - the **empty** states of `renderFleet` (zero units), `renderAlerts` (nothing alerting), `paneIssues` (no issues) and `paneMoves` (no history);
@@ -417,7 +419,7 @@ Ordered roughly by value. All are unbuilt and all were deliberately deferred —
 11. **Roles** (tech vs office/manager) and a real per-unit service history.
 
 **Small, already-scoped**
-- Show-days field on a job + "Day 2 of 4" on the card (needs a one-line `shows.days` migration).
+- ~~Show-days field on a job~~ **superseded 2026-08-02**: `shows.show_days` shipped as a date *array* (a `days` count can't represent multi-weekend shows). Still open from that idea: "Day 2 of 4" / phase label on the job card, now derivable.
 - Archive jobs — as a **button in job detail plus an Archived filter**, deliberately *not* a third swipe direction.
 - The §7 debt list.
 
