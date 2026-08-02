@@ -1,0 +1,9 @@
+# Show archives hold crew data: client site GPS, placement photos, candid notes.
+# This repo deploys to PUBLIC GitHub Pages — a `git add -A` must never sweep them in.
+archive/
+
+# fv_deploy.py local state
+tools/.fv_state.json
+
+# Personal working context (client + budget details) — never publish
+CLAUDE.md
