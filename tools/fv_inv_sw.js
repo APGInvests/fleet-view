@@ -30,10 +30,12 @@ module.exports = (app, t) => {
   // Both assertions fail loudly if someone removes the guard or grows CDN_HOSTS.
   t.includes(src, "url.hostname === 'basemap.nationalmap.gov'", 'explicit early return for USGS tiles present');
   t.includes(src, "tile.openstreetmap.org", 'OSM tiles covered by the same guard');
+  t.includes(src, "url.hostname === 'imagery.nationalmap.gov'", 'NAIP dynamic renders covered by the same guard — large and uncacheable-by-design');
   t.includes(src, 'TILE SERVERS NEVER ENTER THE SERVICE WORKER CACHE', 'reasoning stated in the code, not just HANDOFF');
   const cdnLine = (src.match(/CDN_HOSTS\s*=\s*\[[^\]]*\]/) || [''])[0];
-  t.excludes(cdnLine, 'nationalmap', 'CDN_HOSTS does not contain the USGS host');
+  t.excludes(cdnLine, 'nationalmap', 'CDN_HOSTS does not contain the USGS host (either subdomain)');
   t.excludes(cdnLine, 'openstreetmap', 'CDN_HOSTS does not contain OSM');
+  t.excludes(cdnLine, 'imagery', 'CDN_HOSTS does not contain the NAIP host');
 
   t.group('service worker: app registration');
   t.includes(app.code, "serviceWorker.register('sw.js')", 'relative registration (sandbox-scopable)');
