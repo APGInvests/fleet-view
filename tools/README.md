@@ -6,14 +6,13 @@ Test + deploy tooling for the app. **Nothing here is served to the crew** —
 ## Deploy an app change
 
 ```bash
-python3 fv_deploy.py pull                      # app + tooling to disk, caches blob sha
-#   ...edit index.html with targeted edits...
+#   ...edit index.html in the local clone (targeted edits)...
 python3 fv_deploy.py preflight -m "what changed"
-#   ...one push: github create_or_update_file with paramsFile=/tmp/fv_params.json
+git add -A && git commit -m "what changed" && git push
 python3 fv_deploy.py verify                    # polls until live bytes match
 ```
 
-`preflight` refuses to stage anything if the invariant suite fails. That refusal
+`preflight` refuses to clear the build if the invariant suite fails. That refusal
 is the point: a broken push means broken phones on a show day.
 
 ## Files
@@ -23,7 +22,7 @@ is the point: a broken push means broken phones on a show day.
 | `fv_deploy.py`  | Deploy driver: `pull` / `preflight` / `verify` / `status` |
 | `fv_harness.js` | Loads `index.html` headless — DOM stub, Supabase mock, zero npm deps |
 | `fv_assert.js`  | Tiny assertion helper |
-| `fv_smoke.js`   | Standing invariant suite (96 assertions) |
+| `fv_smoke.js`   | Standing invariant suite runner + core assertions |
 
 ## The invariants
 

@@ -1,28 +1,24 @@
 #!/usr/bin/env python3
 """
-fv_deploy.py — FleetView deploy driver. Three subcommands, three tool calls.
+fv_deploy.py — FleetView deploy driver.
 
-WHY THIS FILE EXISTS
---------------------
-The old deploy loop cost ~15 tool calls: an ad-hoc syntax check, a smoke-test
-harness re-typed inline, a params stager, the push, and then a verify step that
-burned up to TWELVE separate Bash calls sleeping 15s each while GitHub Pages'
-CDN caught up. This collapses it to:
+Deploys are plain git: edit the local clone, run preflight, then
+`git add` / `git commit` / `git push` to main. This tool covers the two
+ends of that loop:
 
-    1)  python3 fv_deploy.py pull
-    2)  python3 fv_deploy.py preflight -m "msg" [--extras feat.js]
-    3)  ExecuteIntegration github__create_or_update_file  paramsFile=/tmp/fv_params.json
-    4)  python3 fv_deploy.py verify
+    1)  python3 fv_deploy.py preflight -m "msg" [--extras feat.js]
+        (runs the standing invariant suite; refuses to clear a broken build)
+    2)  git add -A && git commit -m "msg" && git push
+    3)  python3 fv_deploy.py verify
+        (polls the live site until its bytes match the file on disk)
 
-TWO COST TRICKS THAT MATTER
+`pull` predates the git-clone workflow (it fetches the LIVE app over the
+local file) — only use it to resync a machine that has no clone state.
+
+ONE COST TRICK THAT MATTERS
 ---------------------------
-* index.html is ~130 KB (~32k tokens). It must NEVER be read into the agent's
-  context. `pull` curls it to disk; you then use grep/sed/Edit on target regions
-  only. Never `Read` the whole file.
-* The GitHub API needs the previous blob SHA to update a file, and
-  get_contents returns the ENTIRE file to give it to you. Instead we read the
-  SHA from the public git-tree API (metadata only, no content) and
-  cross-check it against a locally computed git blob hash. Zero token cost.
+* index.html is ~130 KB (~32k tokens). It must NEVER be read into an agent's
+  context whole. Use grep/sed/Edit on target regions only.
 
 VERIFY IS BY CONTENT HASH, NOT MARKER GREP
 ------------------------------------------
@@ -34,7 +30,6 @@ now fetch what we intended.
 """
 
 import argparse
-import base64
 import glob
 import hashlib
 import json
@@ -59,7 +54,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # tools/index.html back when `pull` curled the live file down for API pushes.
 LOCAL = os.path.join(os.path.dirname(HERE), APP_PATH)
 STATE = os.path.join(HERE, ".fv_state.json")
-PARAMS = "/tmp/fv_params.json"
 
 
 def _c(txt, code):
@@ -224,34 +218,13 @@ def cmd_preflight(args):
 
     with open(LOCAL, "rb") as f:
         data = f.read()
-
-    st = load_state()
-    sha = args.sha or st.get("blob_sha")
-    if not sha:
-        bad("no base blob sha known. Run `pull` first, or pass --sha.")
-        return 1
-
-    params = {
-        "owner": OWNER,
-        "repo": REPO,
-        "path": APP_PATH,
-        "branch": BRANCH,
-        "message": args.message,
-        "content": data.decode("utf-8"),
-        "sha": sha,
-    }
-    with open(PARAMS, "w") as f:
-        json.dump(params, f)
-
     new256 = sha256(data)
     save_state({"pending_sha256": new256, "pending_message": args.message})
 
-    ok(f"staged {PARAMS}  ({len(data):,} bytes)")
-    info(f"base blob sha : {sha}")
-    info(f"expected live : sha256 {new256[:16]}…")
+    ok(f"cleared to ship  ({len(data):,} bytes, sha256 {new256[:16]}…)")
     print()
-    print("Next (one tool call — do NOT inline the file):")
-    print("  ExecuteIntegration action=github__create_or_update_file paramsFile=" + PARAMS)
+    print("Next:")
+    print(f'  git add -A && git commit -m "{args.message}" && git push')
     print("Then:")
     print("  python3 fv_deploy.py verify")
     return 0
@@ -289,8 +262,8 @@ def cmd_verify(args):
                 info(f"next base blob sha cached: {new_blob}")
                 print()
                 print(f"  LIVE: https://apginvests.github.io/fleet-view/?v={int(time.time())}")
-                print("  Installed PWAs can hold a stale cache — tell the crew to open that "
-                      "cache-busted link once (no service worker yet).")
+                print("  If sw.js changed, its VERSION must have been bumped — installed PWAs "
+                      "only refresh their shell when fv-sw-N changes.")
                 return 0
         except urllib.error.HTTPError as e:
             last = f"HTTP {e.code}"
@@ -327,10 +300,9 @@ def main():
     pl = sub.add_parser("pull", help="fetch the live app + test tooling to disk, cache blob sha")
     pl.add_argument("--no-tools", action="store_true", help="skip refreshing tools/*.js")
 
-    pf = sub.add_parser("preflight", help="run invariants, then stage the commit")
+    pf = sub.add_parser("preflight", help="run invariants; refuse to clear a broken build")
     pf.add_argument("-m", "--message", required=True, help="commit message")
     pf.add_argument("--extras", nargs="*", default=[], help="per-feature assertion files")
-    pf.add_argument("--sha", help="override base blob sha")
 
     vf = sub.add_parser("verify", help="poll live app until it matches (single call)")
     vf.add_argument("--timeout", type=int, default=240)

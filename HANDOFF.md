@@ -329,7 +329,7 @@ These were each learned the hard way, several from production bugs.
 
 ## 9. Ship-verify loop (follow this for every change)
 
-There is no test suite and no CI. This discipline replaces both, and it is why a very large number of changes shipped without accumulating bugs.
+Two guards stand behind every deploy, and they are complementary, not interchangeable. The **standing invariant suite** — 680 assertions as of 2026-08-01, `tools/fv_smoke.js` plus every `tools/fv_inv_*.js`, run automatically by preflight, which refuses to clear a broken build — protects the contracts someone has already encoded. The **loop below** catches what no assertion watches yet: the surface you just built, deploy and caching problems, real-device behavior. A green suite is not "shipped", and this discipline without the suite is what let contract regressions slip before the suite existed. Do both.
 
 1. **Read the real current code** for the lines you're changing. Never edit from memory — the file drifts.
 2. Make **one logical change**.
@@ -340,15 +340,36 @@ There is no test suite and no CI. This discipline replaces both, and it is why a
      .exec(fs.readFileSync('index.html','utf8'))[1];
    new vm.Script(s); console.log('syntax OK')"
    ```
-4. **Behaviour-test the changed path with real assertions** — the expected value, the full expected sort order, the stored value read back. *Not* "it didn't throw." A sort bug that put missing values first passed every crash check and failed one order assertion. (Root cause worth remembering: `Number(null) === 0`, not `NaN`.)
-5. **Regression sweep** every top-level render entry point (`renderJobsList`, `renderJobDetail`, `renderFleet`, `renderAlerts`, `renderMapScreen`, `unitCard`, the `pane*` functions) against **empty**, **populated**, and **edge** state — null fields, references to deleted records, quotes/emoji in strings, one item, many items.
-6. **Bump the build marker.**
-7. **Deploy** (push `index.html` to `main`).
-8. **Verify live:** fetch the URL and assert the marker is present. Only now is it shipped.
+4. **Behaviour-test the changed path with real assertions** — the expected value, the full expected sort order, the stored value read back. *Not* "it didn't throw." A sort bug that put missing values first passed every crash check and failed one order assertion. (Root cause worth remembering: `Number(null) === 0`, not `NaN`.) If what you tested is a contract that must hold forever, its home is a standing `tools/fv_inv_*.js` file (shape in `tools/README.md`) — preflight then re-proves it on every future deploy.
+5. **Run the full suite:**
+   ```bash
+   python3 tools/fv_deploy.py preflight -m "what changed"
+   ```
+   Auto-loads every `fv_inv_*.js` group, prints `RESULT: PASS (680/680)` (count as of 2026-08-01) and refuses to clear the build on any failure. (Suite only, no preflight wrapper: `node tools/fv_smoke.js index.html tools/fv_inv_*.js`.)
+6. **Manual regression sweep — narrowed 2026-08-01 to what the suite does not render.** The suite already exercises `renderFleet`, `renderAlerts`, `unitCard`, `paneVitals`, `paneIssues`, `paneService` and `paneMoves` against populated and edge-field fixtures (`fv_inv_fleetcard.js`, `fv_inv_alerts.js`, `fv_inv_bigiron.js`, `fv_inv_status.js`, `fv_inv_placementphotos.js`). Still swept **by hand, in the harness or browser**, because no assertion renders them:
+   - `renderJobsList`, `renderJobDetail`, `renderMapScreen`, `paneInfo` — all three states (**empty**, **populated**, **edge**);
+   - the **empty** states of `renderFleet` (zero units), `renderAlerts` (nothing alerting), `paneIssues` (no issues) and `paneMoves` (no history);
+   - **hostile strings** (quotes/emoji in names and notes) through any render path you touched — `esc()` is unit-tested, but no render entry point is ever fed them;
+   - any **new surface** your change adds — the suite doesn't know it exists yet.
+7. **Bump the marker(s).** The build marker at `index.html:13` on every deploy. If `sw.js` changed, *also* bump its `VERSION` (`fv-sw-N`, `sw.js:15`) — installed PWAs only refresh their cached shell when that string changes.
+8. **Deploy:**
+   ```bash
+   git add -A && git commit -m "what changed" && git push
+   ```
+   Pushing `main` ships **everything on it** — `index.html` and `sw.js` both deploy this way; there is no per-file deploy. Work not cleared for production lives on a branch (see the plan-doc convention in `docs/plans/2026-07-29-offline-write-path.md`).
+9. **Verify live.** Only now is it shipped. Either poll until the live bytes match the file on disk:
+   ```bash
+   python3 tools/fv_deploy.py verify
+   ```
+   or grep the marker:
    ```bash
    curl -s -L "https://apginvests.github.io/fleet-view/?v=$(date +%s)" | grep -o "fleetview build [0-9-]* [a-z+-]*"
    ```
-9. **Record** what changed.
+   If `sw.js` changed, also confirm the new version is live:
+   ```bash
+   curl -s "https://apginvests.github.io/fleet-view/sw.js?v=$(date +%s)" | grep -o "fv-sw-[0-9]\+"
+   ```
+10. **Record** what changed.
 
 ### Headless harness notes
 Run the extracted script in a Node `vm` context with fake globals (`document`, `localStorage`, `navigator`, `crypto`, `matchMedia`, `location`, `scrollTo`) and stubs for `supabase.createClient`, `L`, `Chart`, `QRCode`, `Html5Qrcode`. Pitfalls that produce **fake** failures — rule these out before believing a bug:
@@ -360,8 +381,7 @@ Run the extracted script in a Node `vm` context with fake globals (`document`, `
 The database holds real crew records. To click through the live app safely, build an isolated copy: replace the Supabase client with an in-memory stub (so writes are impossible), fake the session, namespace localStorage, add a visible "SANDBOX — NOT CONNECTED TO REAL DATA" banner, deploy it to a **separate filename**, drive it, then delete it and verify the deletion returns 404. Never point a click-through at production.
 
 ### Deploy gotchas
-- **Anonymous GitHub API reads are rate-limited to 60/hour** and *will* die mid-session during iterative deploys. The tell: failure tracks request volume, not payload. Reuse the file SHA returned by the previous authenticated write instead of re-reading it.
-- Writes can succeed against a renamed repo while **Pages paths 404** — git forgives renames, static hosting doesn't. The repo slug is `fleet-view`.
+- Writes can succeed against a renamed repo while **Pages paths 404** — git forgives renames, static hosting doesn't. The repo slug is `fleet-view`. (§11 states this too — kept in both places for now.)
 
 ---
 
@@ -419,6 +439,6 @@ Ordered roughly by value. All are unbuilt and all were deliberately deferred —
 
 1. Clone the repo. There is nothing to install — open `index.html`.
 2. Read §3 (sync), §4 (two-layer model) and §8 (standing rules) before changing anything. Those three sections encode every expensive lesson.
-3. To see the app with data, sign in and use **Settings → Load sample data**.
+3. To see the app with data, sign in — what loads is the **live production fleet**, shared with the crew. (The sample-data loader was removed so it can't pollute the real fleet.) Look, don't click-test: for safe click-throughs use the §9 headless harness or sandbox procedure. If you must exercise a real write, use a job named with a `DEMO —` prefix and remove it after — Settings shows a **Remove demo data** button while any exists.
 4. Make your first change following §9 end to end, including the live verification step.
 5. Do not restore anything in §6 without asking.
