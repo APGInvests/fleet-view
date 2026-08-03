@@ -156,6 +156,32 @@ module.exports = async (app, t) => {
   t.excludes(app.fn.renderJobsList(), 'Bare Fest', 'and filters out the rest');
   app.live.jobsSearch = '';
 
+  t.group('phaseOf: pure arithmetic from show_days, four phases, null without');
+  const ps = { showDays: ['2026-07-04', '2026-07-05', '2026-07-11', '2026-07-12'] };
+  t.eq(app.fn.phaseOf(ps, '2026-07-01'), 'Load-in', 'before first show day');
+  t.eq(app.fn.phaseOf(ps, '2026-07-04'), 'Show', 'listed day');
+  t.eq(app.fn.phaseOf(ps, '2026-07-08'), 'Dark', 'gap inside the list');
+  t.eq(app.fn.phaseOf(ps, '2026-07-13'), 'Load-out', 'after last show day');
+  t.eq(app.fn.phaseOf({}, '2026-07-04'), null, 'no show_days -> null, no phase claimed');
+
+  t.group('activity log: day headers with day #, phase, and counts');
+  const lts = (str) => Date.parse(str);   // local-time ms, matching the log's local day-bucketing
+  app.setState({
+    shows: [{ id: 'show-log', name: 'Log Fest', startDate: '2026-07-01', showDays: ['2026-07-04', '2026-07-05'] }],
+    units: [{ id: 'u-log', serial: 'LOG1', klass: 'big', locationType: 'show', locationId: 'show-log', photos: [], jobMeta: {}, updatedAt: 1 }],
+    reports: [{ id: 'r-a', unitId: 'u-log', showId: 'show-log', techName: 'T', timestamp: lts('2026-07-02T10:00:00') },
+              { id: 'r-b', unitId: 'u-log', showId: 'show-log', techName: 'T', timestamp: lts('2026-07-02T15:00:00') }],
+    movements: [{ id: 'm-a', unitId: 'u-log', fromType: 'shop', fromId: 'p1', toType: 'show', toId: 'show-log', techName: 'T', timestamp: lts('2026-07-04T09:00:00') }],
+    issues: [],
+  });
+  app.fn.openJobLog('show-log');
+  const log = String(app.document.querySelector('#sheet').innerHTML);
+  t.includes(log, 'evday', 'day header rows render');
+  t.includes(log, 'Day 2 · Load-in', 'check day is numbered and phased');
+  t.includes(log, '2 checks', 'day counts aggregate');
+  t.includes(log, 'Day 4 · Show', 'show day is phased');
+  t.includes(log, '1 move', 'single event stays singular');
+
   t.group('tzGuess: known venue -> known zone, unknown -> null');
   t.eq(app.fn.tzGuess({ lng: -87.62 }), 'America/Chicago', 'Grant Park -> Central');
   t.eq(app.fn.tzGuess({ lng: -116.24 }), 'America/Los_Angeles', 'Indio -> Pacific');
