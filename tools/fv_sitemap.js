@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * fv_sitemap.js — render a show archive's site map: one overview page + four
- * quadrant pages, as a self-contained PDF plus one PNG per page.
+ * fv_sitemap.js — render a show archive's site map (site-map.pdf + page PNGs):
+ * one overview page + four
  *
  * The artifact a 2027 reader actually opens: every unit's placement drawn on
  * embedded USGS NAIP satellite imagery. Pin labels are PLACEMENT TEXT + kVA
@@ -475,17 +475,19 @@ async function generate(dir) {
       show, groups, frames[i].box, img.jpeg, qArea, { coverage }));
   }
 
-  // write outputs
+  // write outputs ("site-map", hyphenated — "sitemap" reads as a website artifact;
+  // lowercase-no-space matches every other archive file and needs no shell quoting)
+  for (const f of fs.readdirSync(dir)) if (/^sitemap[.-]/.test(f)) fs.rmSync(path.join(dir, f), { force: true });
   const pdf = await renderPdf(pages, PDFDocument);
-  fs.writeFileSync(path.join(dir, 'sitemap.pdf'), pdf);
-  const pngNames = ['sitemap-overview.png', ...frames.map((f) => `sitemap-quad-${f.letter.toLowerCase()}.png`)];
+  fs.writeFileSync(path.join(dir, 'site-map.pdf'), pdf);
+  const pngNames = ['site-map-overview.png', ...frames.map((f) => `site-map-quad-${f.letter.toLowerCase()}.png`)];
   for (let i = 0; i < pages.length; i++) {
     const png = await sharp(Buffer.from(pageToSvg(pages[i])), { density: 144 }).png().toBuffer();
     fs.writeFileSync(path.join(dir, pngNames[i]), png);
   }
 
   return {
-    pdf: 'sitemap.pdf', pngs: pngNames, pdf_bytes: pdf.length,
+    pdf: 'site-map.pdf', pngs: pngNames, pdf_bytes: pdf.length,
     units_mapped: withPin.length, units_unmapped: noPin.length, groups: groups.length,
     quadrant_unit_counts: quads.map((q) => q.length),
     imagery: [...sources].join('+'),

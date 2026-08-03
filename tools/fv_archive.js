@@ -662,7 +662,7 @@ returned them (snake_case); \`data/csv/\` holds the same data flattened for a
 spreadsheet. Photos are real files under \`photos/\`, indexed in \`photos/index.csv\`.
 \`cadence.md\` (and \`data/csv/cadence.csv\`) is the show's day-by-day delivery
 cadence — read its caveats section before quoting any number from it.
-\`sitemap.pdf\` (pages also as \`sitemap-*.png\`) draws every unit's placement on
+\`site-map.pdf\` (pages also as \`site-map-*.png\`) draws every unit's placement on
 embedded satellite imagery — labels are placement text + kVA, never serials;
 pins are the last logged movement, not surveyed positions.
 
