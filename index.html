@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-08-02 show-days-cal-fix -->
+<!-- fleetview build 2026-08-02 job-card-meta -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -191,6 +191,8 @@
   .jobrow{cursor:pointer;padding:15px;margin-bottom:11px}
   .jobrow .jt{font-family:var(--serif);font-size:21px;font-weight:700}
   .jobrow .jsub{font-family:var(--mono);font-size:11px;color:var(--ink2);text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+  .jnum{font-family:var(--mono);font-size:12px;font-weight:400;color:var(--ink2);margin-left:7px;letter-spacing:0;white-space:nowrap}
+  .jdates{font-family:var(--mono);font-size:11px;color:var(--ink);margin-top:3px}
   .hbar{display:flex;gap:7px;margin-top:11px;flex-wrap:wrap}
   .hchip{font-family:var(--mono);font-size:11px;font-weight:700;padding:5px 10px;border-radius:8px;display:flex;align-items:center;gap:6px;background:var(--surface2);color:var(--ink2)}
   .hchip .dot{width:8px;height:8px;border-radius:50%}
@@ -826,9 +828,9 @@ function showJobOnMap(showId){const s=showById(showId);if(!s)return;S.currentSho
 function renderJobsList(){
   const favs=getFavs();
   let list=S.shows.slice().sort((a,b)=>(favs.includes(b.id)?1:0)-(favs.includes(a.id)?1:0));
-  if(jobsSearch){const q=jobsSearch.toLowerCase();list=list.filter(s=>[s.name,s.location].some(x=>String(x||'').toLowerCase().includes(q)));}
-  const rows=list.map(s=>{const h=jobHealth(s);const d=dayOfShow(s);const fav=favs.includes(s.id);
-    return `<div class="swipe-wrap"><div class="swipe-maphint">🗺 Map</div><div class="swipe-actions"><button class="swipe-act del" onclick="event.stopPropagation();closeSwipe(this);confirmDeleteJob('${s.id}')">Delete</button></div><div class="card jobrow swipe-card" onpointerdown="swStart(event,this)" onpointermove="swMove(event,this)" onpointerup="jbEnd(event,this,'${s.id}')" onpointercancel="swCancel(this)"><div class="between"><div><div class="jt">${esc(s.name)}</div><div class="jsub">${esc(s.location||'')}${d?(' · Day '+d):''}</div></div><button class="favstar" style="color:${fav?'var(--accent)':'var(--ink2)'}" onclick="event.stopPropagation();toggleFav('${s.id}')">${fav?'★':'☆'}</button></div>
+  if(jobsSearch){const q=jobsSearch.toLowerCase();list=list.filter(s=>[s.name,s.location,s.cesJobNumber].some(x=>String(x||'').toLowerCase().includes(q)));}
+  const rows=list.map(s=>{const h=jobHealth(s);const d=dayOfShow(s);const fav=favs.includes(s.id);const dl=jobDatesLine(s);
+    return `<div class="swipe-wrap"><div class="swipe-maphint">🗺 Map</div><div class="swipe-actions"><button class="swipe-act del" onclick="event.stopPropagation();closeSwipe(this);confirmDeleteJob('${s.id}')">Delete</button></div><div class="card jobrow swipe-card" onpointerdown="swStart(event,this)" onpointermove="swMove(event,this)" onpointerup="jbEnd(event,this,'${s.id}')" onpointercancel="swCancel(this)"><div class="between"><div><div class="jt">${esc(s.name)}${s.cesJobNumber?`<span class="jnum">#${esc(s.cesJobNumber)}</span>`:''}</div><div class="jsub">${esc(s.location||'')}${d?(' · Day '+d):''}</div>${dl?`<div class="jdates">${esc(dl)}</div>`:''}</div><button class="favstar" style="color:${fav?'var(--accent)':'var(--ink2)'}" onclick="event.stopPropagation();toggleFav('${s.id}')">${fav?'★':'☆'}</button></div>
       <div class="hbar"><span class="hchip">${h.units} units</span>${h.down?`<span class="hchip alarm"><span class="dot" style="background:var(--red)"></span>${h.down} down</span>`:''}${h.overdue?`<span class="hchip warnh">⏱ ${h.overdue} overdue</span>`:''}${!h.down&&!h.overdue&&h.units?`<span class="hchip" style="color:var(--green)"><span class="dot" style="background:var(--green)"></span>all good</span>`:''}<span class="hchip">${h.last?('active '+fmtAgo(h.last)):'no activity'}</span></div></div></div>`;}).join('');
   return `<div class="between"><h2 class="section" style="margin:0">Jobs</h2><button class="btn primary sm" onclick="editShow()">+ New</button></div>
     <p class="muted" style="margin:6px 0 12px;font-size:13px">Tap a job to see its fleet. Star a job to pin it to the top.</p>
@@ -843,8 +845,8 @@ function renderJobDetail(id){const s=showById(id);if(!s){jobView=null;return ren
   if(jobSearch){const q=jobSearch.toLowerCase();list=list.filter(u=>[u.tagId,u.serial,u.make,u.model,placeOf(u,id),assetLabel(u,id),(u.kw?u.kw+' kva':'')].some(x=>String(x||'').toLowerCase().includes(q)));}
   list=sortUnits(list.filter(u=>passFilter(u,jobFilter)));
   return `<button class="backbtn" onclick="go('jobs')">${IC.back} All jobs</button>
-    <div class="between"><h2 class="section" style="margin:0">${esc(s.name)}</h2><button class="btn ghost sm" onclick="editShow('${id}')">Edit</button></div>
-    <div class="hbar" style="margin:6px 0 12px"><span class="hchip">${esc(s.location||'')}${d?(' · Day '+d):''}</span>${h.down?`<span class="hchip alarm">${h.down} down</span>`:''}${h.overdue?`<span class="hchip warnh">${h.overdue} overdue</span>`:''}</div>
+    <div class="between"><h2 class="section" style="margin:0">${esc(s.name)}${s.cesJobNumber?`<span class="jnum">#${esc(s.cesJobNumber)}</span>`:''}</h2><button class="btn ghost sm" onclick="editShow('${id}')">Edit</button></div>
+    <div class="hbar" style="margin:6px 0 12px"><span class="hchip">${esc(s.location||'')}${d?(' · Day '+d):''}</span>${jobDatesLine(s)?`<span class="hchip">${esc(jobDatesLine(s))}</span>`:''}${h.down?`<span class="hchip alarm">${h.down} down</span>`:''}${h.overdue?`<span class="hchip warnh">${h.overdue} overdue</span>`:''}</div>
     <div class="row" style="margin-bottom:12px"><button class="btn ghost wide sm" onclick="openJobMap('${id}')">${IC.map} Map</button><button class="btn ghost wide sm" onclick="openJobLog('${id}')">${IC.log} Log</button><button class="btn dark wide sm" onclick="openReport('${id}')">${IC.report} Report</button></div>
     <div class="searchbar">${IC.search}<input placeholder="Search this job…" value="${esc(jobSearch)}" oninput="jobSearch=this.value;rerenderJob('${id}')"/></div>
     ${filterBar(jobFilter,'setJobFilter')}${list.length?'<p class="muted" style="font-size:11px;margin:2px 0 8px">Swipe a unit left to send it off the job or delete it.</p>':''}
@@ -1297,6 +1299,15 @@ function renderCal(){const el=$('#sh_cal');if(!el)return;const first=new Date(ca
   el.innerHTML=h+'</div>';
   const c=$('#sh_calCount');if(c)c.textContent=calSel.size?(calSel.size+' show day'+(calSel.size===1?'':'s')+' selected — dark days stay unselected.'):'Tap the days the show runs. Multi-weekend? Pick both weekends; the dark days between stay unselected.';}
 function tzGuess(site){if(!site||site.lng==null)return null;const x=+site.lng;return x>-85.5?'America/New_York':x>-102?'America/Chicago':x>-115?'America/Denver':'America/Los_Angeles';}
+/* Compact date labels for cards. Show days render as consecutive runs so a
+   two-weekend show reads "Apr 11–13 & 18–20", never eleven straight days. */
+function fmtD(isoDate){return new Date(isoDate+'T12:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'});}
+function showDaysLabel(s){const sd=Array.isArray(s.showDays)&&s.showDays.length?[...s.showDays].sort():null;if(!sd)return '';
+  const runs=[];let a=sd[0],b=sd[0];
+  for(let i=1;i<sd.length;i++){if(Date.parse(sd[i]+'T12:00:00Z')-Date.parse(b+'T12:00:00Z')===86400e3)b=sd[i];else{runs.push([a,b]);a=b=sd[i];}}
+  runs.push([a,b]);
+  return runs.map(([x,y])=>x===y?fmtD(x):fmtD(x)+'–'+(x.slice(0,7)===y.slice(0,7)?String(+y.slice(8,10)):fmtD(y))).join(' & ');}
+function jobDatesLine(s){const parts=[];const sd=showDaysLabel(s);if(sd)parts.push(sd);if(s.startDate)parts.push('starts '+fmtD(s.startDate));return parts.join(' · ');}
 function editShow(id){const s=id?showById(id):{};venueSite=s.site?{lat:s.site.lat,lng:s.site.lng,zoom:s.site.zoom}:null;calInit(s);sheet(id?'Edit job':'New job',`<label class="fld"><span class="lb">Show / event name *</span><input id="sh_name" value="${esc(s.name||'')}" placeholder="Desert Sound Fest 2026"/></label><label class="fld"><span class="lb">Location</span><input id="sh_loc" value="${esc(s.location||'')}" placeholder="City, venue"/></label><label class="fld"><span class="lb">Start date</span><input id="sh_start" type="date" value="${esc(s.startDate||'')}"/></label><div class="fld"><span class="lb">Show days</span><div class="calwrap" id="sh_cal"></div><p class="muted" id="sh_calCount" style="font-size:12px;margin:6px 0 0"></p></div><div class="grid2"><label class="fld"><span class="lb">Project manager</span><input id="sh_pm" value="${esc(s.pmName||'')}"/></label><label class="fld"><span class="lb">CES job #</span><input id="sh_job" value="${esc(s.cesJobNumber||'')}" placeholder="e.g. 26-1042"/></label></div><label class="fld"><span class="lb">Time zone</span><select id="sh_tz">${TZ_OPTS.map(([v,l])=>`<option value="${v}" ${(s.tz||'')===v?'selected':''}>${l}</option>`).join('')}</select></label><div class="lb" style="margin:4px 0 6px">Venue location (optional). Centers the map</div><div class="row" style="margin-bottom:8px"><input id="sh_venueSearch" placeholder="Search e.g. Wrigley Field"/><button type="button" class="btn dark" onclick="venueSearch()">Find</button></div><button type="button" class="btn ghost block" style="margin-bottom:8px" onclick="venueUseGPS()">📍 Use my current location</button><div id="venuePicker" style="height:200px;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--surface2)"></div><p class="muted" id="venueReadout" style="font-size:12px;margin:6px 0 12px">${venueSite?('✓ Venue set ('+venueSite.lat+', '+venueSite.lng+')'):'Tap the map to drop a pin, or search / use your location.'}</p><button class="btn primary block" onclick="saveShow('${id||''}')">${id?'Save':'Create job'}</button>`);renderCal();setTimeout(initVenuePicker,160);}
 function saveShow(id){const nm=$('#sh_name').value.trim();if(!nm){toast('Name required');return;}let s=id?showById(id):null;if(!s){s={id:uid('show'),createdAt:now()};S.shows.push(s);}s.name=nm;s.location=$('#sh_loc').value.trim();s.startDate=$('#sh_start').value||null;s.showDays=calSel.size?[...calSel].sort():null;s.pmName=$('#sh_pm').value.trim()||null;s.cesJobNumber=$('#sh_job').value.trim()||null;s.tz=$('#sh_tz').value||tzGuess(venueSite);s.site=venueSite||null;S.currentShowId=s.id;save();closeSheet();openJob(s.id);toast('Job ready');}
 function openMore(){sheet('More',`<button class="btn ghost block" style="margin-bottom:9px" onclick="openTestQR()">Make a test QR code</button><button class="btn ghost block" onclick="openSettings()">Settings</button>`);}

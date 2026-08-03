@@ -121,6 +121,41 @@ module.exports = async (app, t) => {
   t.ok(labels.every((l) => !/<button/i.test(l)), 'no <button> inside any <label> in the edit-job sheet');
   t.excludes(sheetHtml, 'Andy', 'no real person\'s name in the sheet markup');
 
+  t.group('job card: metadata renders when present, stays silent when absent');
+  const dl = (o) => app.fn.jobDatesLine(o);
+  const f = app.fn.fmtD;
+  t.eq(app.fn.showDaysLabel({ showDays: ['2026-07-30', '2026-07-31', '2026-08-01', '2026-08-02'] }),
+    `${f('2026-07-30')}–${f('2026-08-02')}`, 'contiguous days render as one run');
+  t.eq(app.fn.showDaysLabel({ showDays: ['2027-04-16', '2027-04-17', '2027-04-18', '2027-04-09', '2027-04-10', '2027-04-11'] }),
+    `${f('2027-04-09')}–11 & ${f('2027-04-16')}–18`,
+    'two weekends render as two runs with the month elided, never one span — and unsorted input sorts itself');
+  t.eq(app.fn.showDaysLabel({ showDays: ['2026-09-05'] }), f('2026-09-05'), 'single day renders alone');
+  t.eq(app.fn.showDaysLabel({}), '', 'no show days -> empty, no placeholder');
+  t.eq(dl({ showDays: ['2026-07-30', '2026-07-31'], startDate: '2026-07-15' }),
+    `${f('2026-07-30')}–31 · starts ${f('2026-07-15')}`, 'dates line = show days then start date');
+  t.eq(dl({}), '', 'no dates -> no line');
+
+  app.setState({ shows: [
+    { id: 'show-full', name: 'Meta Fest', location: 'Chicago', startDate: '2026-07-15',
+      showDays: ['2026-07-30', '2026-07-31'], cesJobNumber: '26-1042' },
+    { id: 'show-bare', name: 'Bare Fest' },
+  ] });
+  const cards = app.fn.renderJobsList();
+  t.includes(cards, '#26-1042', 'job number renders on the card');
+  t.includes(cards, app.fn.showDaysLabel({ showDays: ['2026-07-30', '2026-07-31'] }), 'show days render on the card');
+  t.includes(cards, 'starts ' + f('2026-07-15'), 'start date renders on the card');
+  const bare = cards.slice(cards.indexOf('Bare Fest'));
+  t.excludes(bare, 'jnum', 'bare job: no job-number span');
+  t.excludes(bare, 'jdates', 'bare job: no dates line');
+  const detHtml = app.fn.renderJobDetail('show-full');
+  t.includes(detHtml, '#26-1042', 'job number renders on job detail');
+  t.includes(detHtml, 'starts ' + f('2026-07-15'), 'dates chip renders on job detail');
+
+  app.live.jobsSearch = '26-1042';
+  t.includes(app.fn.renderJobsList(), 'Meta Fest', 'searching the job number finds the job');
+  t.excludes(app.fn.renderJobsList(), 'Bare Fest', 'and filters out the rest');
+  app.live.jobsSearch = '';
+
   t.group('tzGuess: known venue -> known zone, unknown -> null');
   t.eq(app.fn.tzGuess({ lng: -87.62 }), 'America/Chicago', 'Grant Park -> Central');
   t.eq(app.fn.tzGuess({ lng: -116.24 }), 'America/Los_Angeles', 'Indio -> Pacific');
