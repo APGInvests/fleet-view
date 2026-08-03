@@ -201,6 +201,23 @@ def cmd_preflight(args):
         bad("fv_smoke.js missing — the standing invariant suite must be present")
         return 1
 
+    # Schema gate: every MAPS field must have a real Postgres column. Live probe
+    # via the public anon key when the network allows; committed snapshot with a
+    # loud banner when it doesn't; refuses to vouch blind. This is the mechanical
+    # form of the §3 rule that failed twice as human memory (movements.photos,
+    # status_events.show_id).
+    gate = os.path.join(HERE, "fv_schema_gate.js")
+    if not os.path.exists(gate):
+        bad("fv_schema_gate.js missing — the schema gate must be present")
+        return 1
+    res = subprocess.run(["node", gate], capture_output=True, text=True)
+    sys.stdout.write("       " + (res.stdout or "").strip() + "\n")
+    if res.stderr.strip():
+        sys.stdout.write(res.stderr)
+    if res.returncode != 0:
+        bad("schema gate FAILED — a mapped field has no column; run the migration first")
+        return 1
+
     # Standing invariants: every tools/fv_inv_*.js file always runs, no opt-in.
     # --extras remains for one-off per-deploy assertion files.
     standing = sorted(glob.glob(os.path.join(HERE, "fv_inv_*.js")))
