@@ -12,7 +12,7 @@
  *   FV_EMAIL=... FV_PASSWORD=... node tools/fv_archive.js --show "Lollapalooza"
  *   FV_EMAIL=... FV_PASSWORD=... node tools/fv_archive.js --show-id <uuid>
  *   FV_EMAIL=... FV_PASSWORD=... node tools/fv_archive.js --list
- *   node tools/fv_archive.js --rebuild <dir>   (offline; recompute timeline from frozen data)
+ *   node tools/fv_archive.js --rebuild <dir>   (offline; recompute cadence from frozen data)
  *   node tools/fv_archive.js --selftest        (offline; no credentials needed)
  *
  * Options: --out <dir> (default archive/). FV_ANON_KEY / FV_URL override the
@@ -49,7 +49,7 @@ const path = require('path');
 
 const URLB = process.env.FV_URL || 'https://eujgglfcpdfgskyqfggg.supabase.co';
 const ANON = process.env.FV_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV1amdnbGZjcGRmZ3NreXFmZ2dnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1ODI4MDksImV4cCI6MjEwMDE1ODgwOX0.0OCf7DeBOeaU3WgihQ2E-cSQ7WdUFPy7DsQJ_2X_8xc';
-const TOOL = 'fv_archive.js v2';   // v2: timeline.md + timeline.csv + --rebuild
+const TOOL = 'fv_archive.js v2';   // v2: cadence.md + cadence.csv + --rebuild
 const TABLES = ['shops', 'shows', 'units', 'reports', 'issues', 'movements', 'status_events'];
 const PAGE = 1000;           // Supabase REST returns at most 1000 rows per request
 const PHOTO_TIMEOUT_MS = 20000;
@@ -190,7 +190,7 @@ function kvaOfUnit(u) {
  * and a unit re-placed after leaving counts again. Departures subtract from the
  * running kVA-on-site figure; if that figure goes negative, arrivals are
  * missing (the 2026-08-01 outage class) and the report says so. */
-function buildTimeline(show, scoped, notes, win) {
+function buildCadence(show, scoped, notes, win) {
   const tz = show.tz || 'America/Chicago';
   const dayKey = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: tz });
 
@@ -330,7 +330,7 @@ function buildTimeline(show, scoped, notes, win) {
   for (const n of notes || []) caveats.push(n);
 
   const fmtRow = (r) => `| ${r.date}${r.pre ? ' †' : ''} | ${r.dayN ?? ''} | ${r.phase ?? ''} | ${r.placed || ''} | ${r.kvaPlaced ? Math.round(r.kvaPlaced) : ''} | ${r.kvaOnSite || ''} | ${r.checks || ''} | ${r.issues || ''} | ${r.run || ''} | ${r.down || ''} |`;
-  const md = `# Timeline — ${show.name}
+  const md = `# Cadence — ${show.name}
 
 One row per show-local day (${tz}). This is the crew's notepad read back: what got
 logged, when. It is a record of logging, which is a floor on the record of work —
@@ -604,16 +604,20 @@ async function archiveShow(show, all, totals, outRoot) {
     notes.push('job_meta verification: effectively UNPOPULATED fleet-wide (no names, no areas) — roster still counts its keys as evidence, but placement columns are empty.');
   }
 
-  /* ---- timeline: delivery cadence per show-local day ---- */
-  const tl = buildTimeline(show, { movements, checks, issues, statusEvents, unitsById }, notes, win);
+  /* ---- cadence: delivery timeline per show-local day ---- */
+  /* Pre-rename archives carried timeline.md / timeline.csv — remove them so a
+   * 2027 reader never finds two names for the same content. */
+  fs.rmSync(path.join(dir, 'timeline.md'), { force: true });
+  fs.rmSync(path.join(dir, 'data', 'csv', 'timeline.csv'), { force: true });
+  const tl = buildCadence(show, { movements, checks, issues, statusEvents, unitsById }, notes, win);
   if (tl) {
-    fs.writeFileSync(path.join(dir, 'data', 'csv', 'timeline.csv'), tl.csv);
-    fs.writeFileSync(path.join(dir, 'timeline.md'), tl.md);
+    fs.writeFileSync(path.join(dir, 'data', 'csv', 'cadence.csv'), tl.csv);
+    fs.writeFileSync(path.join(dir, 'cadence.md'), tl.md);
   }
 
   const manifest = {
     tool: TOOL, generated_at: new Date().toISOString(), read_only: 'this tool only issues GETs',
-    timeline: tl ? tl.meta : null,
+    cadence: tl ? tl.meta : null,
     show, evidence_window: { start: iso(win.start), end: iso(win.end) },
     max_source_row_timestamp: iso(maxTs),
     source_table_totals: totals,
@@ -643,7 +647,7 @@ Show: **${show.name}** (id \`${show.id}\`) · evidence window ${iso(win.start)} 
 This archive is self-contained. \`data/*.json\` holds rows exactly as the backend
 returned them (snake_case); \`data/csv/\` holds the same data flattened for a
 spreadsheet. Photos are real files under \`photos/\`, indexed in \`photos/index.csv\`.
-\`timeline.md\` (and \`data/csv/timeline.csv\`) is the show's day-by-day delivery
+\`cadence.md\` (and \`data/csv/cadence.csv\`) is the show's day-by-day delivery
 cadence — read its caveats section before quoting any number from it.
 
 ## Read these before interpreting anything
@@ -765,7 +769,7 @@ function selftest() {
   for (let i = 0; i < 6; i++) tChecks.push(chk(`2026-07-03T1${i}:30:00Z`));
   for (let i = 0; i < 5; i++) tChecks.push(chk(`2026-07-04T1${i}:30:00Z`));
   const tStatus = [{ unit_id: 'u1', status: 'running', ts: '2026-07-05T18:00:00Z' }];
-  const tl = buildTimeline(tShow, { movements: tMoves, checks: tChecks, issues: [], statusEvents: tStatus,
+  const tl = buildCadence(tShow, { movements: tMoves, checks: tChecks, issues: [], statusEvents: tStatus,
     unitsById: tUnits }, ['fixture note'], { start: Date.parse('2026-07-01T00:00:00Z'), end: Date.parse('2026-07-14T00:00:00Z') });
   const row = (d) => tl.rows.find((r) => r.date === d);
   t('tz bucketing: 03:00Z arrival lands the previous Chicago day', row('2026-07-01').placed === 1 && row('2026-07-02').placed === 0);
@@ -786,7 +790,7 @@ function selftest() {
   t('cadence day arithmetic never NaN', !tl.md.includes('NaN'));
   t('run event counted on its day', row('2026-07-05').run === 1);
   t('no show_days -> phases degrade, timeline still renders',
-    buildTimeline({ id: 's1', name: 'X' }, { movements: tMoves, checks: [], issues: [], statusEvents: [], unitsById: tUnits },
+    buildCadence({ id: 's1', name: 'X' }, { movements: tMoves, checks: [], issues: [], statusEvents: [], unitsById: tUnits },
       [], { start: null, end: null }).rows.every((r) => r.phase === null));
 
   if (process.exitCode) { console.error('SELFTEST FAILED'); process.exit(1); }
@@ -800,7 +804,7 @@ function selftest() {
   const opt = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : null; };
   if (argv.includes('--selftest')) return selftest();
 
-  /* --rebuild <archiveDir>: recompute the DERIVED outputs (timeline) from an
+  /* --rebuild <archiveDir>: recompute the DERIVED outputs (cadence) from an
    * existing archive's frozen data/*.json — offline, no credentials, and by
    * definition unable to touch Supabase. The raw rows are never rewritten. */
   const rb = opt('--rebuild');
@@ -811,15 +815,18 @@ function selftest() {
     const unitsById = new Map(rd('units.json').map((u) => [String(u.id), u]));
     const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
     const win = { start: Date.parse(manifest.evidence_window.start) || null, end: Date.parse(manifest.evidence_window.end) || null };
-    const tl = buildTimeline(show, { movements: rd('movements.json'), checks: rd('checks.json'),
+    const tl = buildCadence(show, { movements: rd('movements.json'), checks: rd('checks.json'),
       issues: rd('issues.json'), statusEvents: rd('status_events.json'), unitsById },
     manifest.data_quality_notes || [], win);
     if (!tl) { console.error('nothing to draw: no events and no show_days'); process.exit(1); }
-    fs.writeFileSync(path.join(dir, 'data', 'csv', 'timeline.csv'), tl.csv);
-    fs.writeFileSync(path.join(dir, 'timeline.md'), tl.md);
-    manifest.timeline = tl.meta;
+    fs.rmSync(path.join(dir, 'timeline.md'), { force: true });          // pre-rename leftovers
+    fs.rmSync(path.join(dir, 'data', 'csv', 'timeline.csv'), { force: true });
+    fs.writeFileSync(path.join(dir, 'data', 'csv', 'cadence.csv'), tl.csv);
+    fs.writeFileSync(path.join(dir, 'cadence.md'), tl.md);
+    delete manifest.timeline;                                           // older manifests carried this key
+    manifest.cadence = tl.meta;
     fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
-    console.log(`timeline rebuilt for "${show.name}" -> ${path.join(dir, 'timeline.md')} ` +
+    console.log(`cadence rebuilt for "${show.name}" -> ${path.join(dir, 'cadence.md')} ` +
       `(${tl.meta.days} day rows, phases ${tl.meta.phases_available ? 'on' : 'OFF — no show_days'}, ` +
       `sustained logging from ${tl.meta.sustained_logging_from})`);
     return;
