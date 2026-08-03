@@ -184,11 +184,13 @@ function makeGrid(x0, y0, x1, y1, cell = 4) {
     const cx = Math.floor((x - x0) / cell), cy = Math.floor((y - y0) / cell);
     return (cx < 0 || cy < 0 || cx >= w || cy >= h) ? -1 : cy * w + cx;
   };
+  /* sampling is INCLUSIVE of the far edge — an exclusive loop skips the last
+   * partial cell, which is how a pin ended up drawn through "Jackson boneyard" */
   return {
-    block(r) { for (let x = r.x; x < r.x + r.w; x += cell) for (let y = r.y; y < r.y + r.h; y += cell) { const i = idx(x, y); if (i >= 0) busy[i] = 1; } },
+    block(r) { for (let x = r.x; x <= r.x + r.w; x += cell) for (let y = r.y; y <= r.y + r.h; y += cell) { const i = idx(x, y); if (i >= 0) busy[i] = 1; } },
     free(r) {
       if (r.x < x0 || r.y < y0 || r.x + r.w > x1 || r.y + r.h > y1) return false;
-      for (let x = r.x; x < r.x + r.w; x += cell) for (let y = r.y; y < r.y + r.h; y += cell) { const i = idx(x, y); if (i < 0 || busy[i]) return false; }
+      for (let x = r.x; x <= r.x + r.w; x += cell) for (let y = r.y; y <= r.y + r.h; y += cell) { const i = idx(x, y); if (i < 0 || busy[i]) return false; }
       return true;
     },
   };
@@ -286,18 +288,46 @@ function buildPage(title, sub, show, groups, box, jpeg, area, opts = {}) {
   const inBox = (g) => g.cx >= box.x0 && g.cx <= box.x1 && g.cy >= box.y0 && g.cy <= box.y1;
   const drawn = groups.filter(inBox);
 
+  /* quadrant frames (overview only) draw FIRST — under pins and labels; a frame
+   * border once sliced straight through "Jackson boneyard". The RAW padded bbox
+   * — "the iron on page X", not the page's aspect-expanded coverage — clipped
+   * to the image area. Letter badges get their space blocked so no label lands
+   * on them. */
+  for (const f of opts.frames || []) {
+    const b = f.raw || f.box;
+    const rx0 = Math.max(px(b.x0), AX), ry0 = Math.max(py(b.y1), AY);
+    const rx1 = Math.min(px(b.x1), AX + AW), ry1 = Math.min(py(b.y0), AY + AH);
+    if (rx1 <= rx0 || ry1 <= ry0) continue;
+    prims.push({ type: 'rect', x: rx0, y: ry0, w: rx1 - rx0, h: ry1 - ry0, stroke: WHITE, width: 2.2 });
+    prims.push({ type: 'rect', x: rx0, y: ry0, w: rx1 - rx0, h: ry1 - ry0, stroke: INK, width: 0.8 });
+    prims.push(textPrim(rx0 + 4, ry0 + 3, f.letter, 13, { bold: true, color: WHITE, halo: false }));
+    prims.push(textPrim(rx0 + 4.6, ry0 + 3.6, f.letter, 13, { bold: true, color: INK, halo: false }));
+    grid.block({ x: rx0, y: ry0, w: 18, h: 18 });
+  }
+
+  /* muted context: another page's iron, visible for orientation but obviously
+   * not countable — small grey dots, no labels, no badges, excluded from the
+   * header count. Prevents the double-count when neighbouring frames overlap. */
+  for (const p of opts.muted || []) {
+    if (p.mx < box.x0 || p.mx > box.x1 || p.my < box.y0 || p.my > box.y1) continue;
+    prims.push({ type: 'circle', x: px(p.mx), y: py(p.my), r: 3.2, fill: '#8a8175', stroke: WHITE, width: 0.8 });
+  }
+
   // markers first (block their space), biggest kVA first so labels favor big iron
   for (const g of drawn) {
     g._x = px(g.cx); g._y = py(g.cy);
     g._r = Math.max(4, Math.min(14, 3 + Math.sqrt(g.totalKva) / 3.5));
-    grid.block({ x: g._x - g._r - 2, y: g._y - g._r - 2, w: 2 * g._r + 4, h: 2 * g._r + 4 });
+    grid.block({ x: g._x - g._r - 4, y: g._y - g._r - 4, w: 2 * g._r + 8, h: 2 * g._r + 8 });
   }
+  /* two passes: all pins first, all labels after — text can never end up under
+   * a later marker (the other half of the "Jackson boneyard" clip) */
+  const labelPrims = [];
   const overflow = [];
   let n = 0;
   for (const g of drawn) {
     prims.push({ type: 'circle', x: g._x, y: g._y, r: g._r, fill: g.suspect ? null : ACCENT, stroke: WHITE, width: 1.6, dash: g.suspect ? [3, 2] : null });
     if (g.members.length > 1 && g._r >= 7) {
-      prims.push(textPrim(g._x - 3.5, g._y - 4, String(g.members.length), 7.5, { bold: true, color: WHITE, halo: false }));
+      labelPrims.push(textPrim(g._x - 3.5, g._y - 4, String(g.members.length), 7.5, { bold: true, color: WHITE, halo: false }));
     }
     const lines = opts.overview
       ? (g.members.length > 1 && g.label ? [[g.label, 7.5, true]] : null)
@@ -310,29 +340,17 @@ function buildPage(title, sub, show, groups, box, jpeg, area, opts = {}) {
       // leader when the label sits away from the pin
       const lx = rect.x + (rect.x > g._x ? 0 : rect.w), ly = rect.y + rect.h / 2;
       if (Math.hypot(lx - g._x, ly - g._y) > g._r + 8) {
-        prims.push({ type: 'line', x1: lx, y1: ly, x2: g._x, y2: g._y, stroke: WHITE, width: 1.4 });
-        prims.push({ type: 'line', x1: lx, y1: ly, x2: g._x, y2: g._y, stroke: INK, width: 0.6 });
+        labelPrims.push({ type: 'line', x1: lx, y1: ly, x2: g._x, y2: g._y, stroke: WHITE, width: 1.4 });
+        labelPrims.push({ type: 'line', x1: lx, y1: ly, x2: g._x, y2: g._y, stroke: INK, width: 0.6 });
       }
       let ty = rect.y;
-      for (const [s, sz, b] of lines) { prims.push(textPrim(rect.x + 2, ty, s, sz, { bold: b, color: INK, halo: true })); ty += sz + 2; }
+      for (const [s, sz, b] of lines) { labelPrims.push(textPrim(rect.x + 2, ty, s, sz, { bold: b, color: INK, halo: true })); ty += sz + 2; }
     } else if (!opts.overview) {
       n++; overflow.push(`${n}. ${g.label ? g.label + ' — ' : ''}${g.kvaLabel}`);
-      prims.push(textPrim(g._x - 2.5, g._y - 4, String(n), 8, { bold: true, color: WHITE, halo: false }));
+      labelPrims.push(textPrim(g._x - 2.5, g._y - 4, String(n), 8, { bold: true, color: WHITE, halo: false }));
     }
   }
-
-  // quadrant frames (overview only): the RAW padded bbox — "the iron on page X",
-  // not the page's aspect-expanded coverage — clipped to the image area
-  for (const f of opts.frames || []) {
-    const b = f.raw || f.box;
-    const rx0 = Math.max(px(b.x0), AX), ry0 = Math.max(py(b.y1), AY);
-    const rx1 = Math.min(px(b.x1), AX + AW), ry1 = Math.min(py(b.y0), AY + AH);
-    if (rx1 <= rx0 || ry1 <= ry0) continue;
-    prims.push({ type: 'rect', x: rx0, y: ry0, w: rx1 - rx0, h: ry1 - ry0, stroke: WHITE, width: 2.2 });
-    prims.push({ type: 'rect', x: rx0, y: ry0, w: rx1 - rx0, h: ry1 - ry0, stroke: INK, width: 0.8 });
-    prims.push(textPrim(rx0 + 4, ry0 + 3, f.letter, 13, { bold: true, color: WHITE, halo: false }));
-    prims.push(textPrim(rx0 + 4.6, ry0 + 3.6, f.letter, 13, { bold: true, color: INK, halo: false }));
-  }
+  prims.push(...labelPrims);
 
   // sidebar (overview): units with no pin — never silently dropped
   if (opts.sidebar && opts.sidebar.length) {
@@ -350,8 +368,11 @@ function buildPage(title, sub, show, groups, box, jpeg, area, opts = {}) {
   prims.push({ type: 'line', x1: M, y1: fy - 4, x2: M, y2: fy + 4, stroke: INK, width: 1.6 });
   prims.push({ type: 'line', x1: M + scalePt, y1: fy - 4, x2: M + scalePt, y2: fy + 4, stroke: INK, width: 1.6 });
   prims.push(textPrim(M + scalePt + 6, fy - 5, `${scaleM} m`, 8, { color: INK }));
-  prims.push(textPrim(M + scalePt + 44, fy - 5, 'N ↑', 8, { color: INK }));
-  if (opts.coverage) prims.push(textPrim(M, fy + 10, opts.coverage, 7.5, { color: '#555' }));
+  // north arrow as a vector triangle — ↑ is not in base-14 Helvetica
+  const nx = M + scalePt + 44;
+  prims.push(textPrim(nx, fy - 5, 'N', 8, { bold: true, color: INK }));
+  prims.push({ type: 'poly', pts: [[nx + 12, fy - 5], [nx + 9, fy + 3], [nx + 15, fy + 3]], fill: INK });
+  if (opts.coverage) prims.push(textPrim(M, fy + 10, opts.coverage + ((opts.muted || []).length ? ' · grey dots are other pages’ iron (not counted here)' : ''), 7.5, { color: '#555' }));
   if (drawn.some((g) => g.suspect)) prims.push(textPrim(M, fy + 21, '◌ dashed pin: stored location disagrees with the movement log — position unverified', 7.5, { color: '#555' }));
   let oy = fy + 32;
   for (const o of overflow.slice(0, 4)) { prims.push(textPrim(M, oy, o, 7.5, { color: INK })); oy += 10; }
@@ -372,6 +393,7 @@ function pageToSvg(page) {
     else if (p.type === 'rect') out.push(`<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="none" stroke="${p.stroke}" stroke-width="${p.width}"/>`);
     else if (p.type === 'circle') out.push(`<circle cx="${p.x}" cy="${p.y}" r="${p.r}" fill="${p.fill || 'none'}" stroke="${p.stroke}" stroke-width="${p.width}"${p.dash ? ` stroke-dasharray="${p.dash.join(',')}"` : ''}/>`);
     else if (p.type === 'line') out.push(`<line x1="${p.x1}" y1="${p.y1}" x2="${p.x2}" y2="${p.y2}" stroke="${p.stroke}" stroke-width="${p.width}"/>`);
+    else if (p.type === 'poly') out.push(`<polygon points="${p.pts.map((q) => q.join(',')).join(' ')}" fill="${p.fill}"/>`);
     else if (p.type === 'text') out.push(`<text x="${p.x}" y="${p.y + p.size * 0.78}" font-family="Helvetica, Arial, sans-serif" font-size="${p.size}"${p.bold ? ' font-weight="bold"' : ''} fill="${p.color}"${p.halo ? ' stroke="#ffffff" stroke-width="2.2" paint-order="stroke" stroke-linejoin="round"' : ''}>${svgEsc(p.str)}</text>`);
   }
   out.push('</svg>');
@@ -396,6 +418,7 @@ function renderPdf(pages, PDFDocument) {
         if (p.fill) doc.fillAndStroke(p.fill, p.stroke); else doc.stroke(p.stroke);
         doc.restore();
       } else if (p.type === 'line') doc.moveTo(p.x1, p.y1).lineTo(p.x2, p.y2).lineWidth(p.width).stroke(p.stroke);
+      else if (p.type === 'poly') doc.polygon(...p.pts).fill(p.fill);
       else if (p.type === 'text') {
         doc.font(p.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(p.size);
         if (p.halo) {
@@ -468,11 +491,30 @@ async function generate(dir) {
   const pages = [buildPage('SITE OVERVIEW', `${groups.length} placements · quadrants A–D on the following pages`, show, groups, ovBox, ovImg.jpeg, ovArea,
     { overview: true, frames, sidebar, sidebarX: M + ovArea.w + 10, coverage })];
 
+  /* Each quadrant page labels ONLY its own partition — groups are rebuilt from
+   * that partition's units so a straddling text-group can't be drawn twice and
+   * page totals sum to the show. Everyone else's iron shows as muted dots. */
   for (let i = 0; i < frames.length; i++) {
     const img = await getImage(frames[i].box, qArea); sources.add(img.source);
-    const inQ = groups.filter((g) => g.cx >= frames[i].box.x0 && g.cx <= frames[i].box.x1 && g.cy >= frames[i].box.y0 && g.cy <= frames[i].box.y1);
+    const own = new Set(quads[i]);
+    const ownGroups = buildGroups(quads[i], show.id);
+    const muted = withPin.filter((p) => !own.has(p));
     pages.push(buildPage(`QUADRANT ${letters[i]}`, `${quads[i].length} units · ${Math.round(quads[i].reduce((s, p) => s + p.kva, 0))} kVA`,
-      show, groups, frames[i].box, img.jpeg, qArea, { coverage }));
+      show, ownGroups, frames[i].box, img.jpeg, qArea, { coverage, muted }));
+  }
+
+  // self-audit: a placed label must never intersect a drawn pin. Reports, not
+  // asserts — imagery pages still ship, but the collision is named on stderr.
+  for (let pi = 0; pi < pages.length; pi++) {
+    const circles = pages[pi].prims.filter((p) => p.type === 'circle' && p.fill === ACCENT);
+    for (const p of pages[pi].prims) {
+      if (p.type !== 'text' || !p.halo) continue;
+      const w = estWidth(p.str, p.size, p.bold), h = p.size + 2;
+      for (const c of circles) {
+        const nx = Math.max(p.x, Math.min(c.x, p.x + w)), ny = Math.max(p.y, Math.min(c.y, p.y + h));
+        if (Math.hypot(c.x - nx, c.y - ny) < c.r) console.error(`LABEL/PIN OVERLAP page ${pi}: "${p.str}" at ${Math.round(p.x)},${Math.round(p.y)} vs pin r${c.r.toFixed(1)} at ${Math.round(c.x)},${Math.round(c.y)}`);
+      }
+    }
   }
 
   // write outputs ("site-map", hyphenated — "sitemap" reads as a website artifact;
