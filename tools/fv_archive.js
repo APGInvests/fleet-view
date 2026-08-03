@@ -13,6 +13,7 @@
  *   FV_EMAIL=... FV_PASSWORD=... node tools/fv_archive.js --show-id <uuid>
  *   FV_EMAIL=... FV_PASSWORD=... node tools/fv_archive.js --list
  *   node tools/fv_archive.js --rebuild <dir>   (offline; recompute cadence from frozen data)
+ *   node tools/fv_archive.js --photos <dir>    (re-download the photo set from frozen rows; public bucket, no credentials)
  *   node tools/fv_archive.js --selftest        (offline; no credentials needed)
  *
  * Options: --out <dir> (default archive/). FV_ANON_KEY / FV_URL override the
@@ -417,6 +418,52 @@ function locName(type, id, showsById, shopsById) {
   return `${type || '?'}:${id || '?'}`;
 }
 
+/* Filename must be unique per (source row, index) — the photo-reclass batch
+ * stamped many rows with ONE shared transaction timestamp, and a ts-only name
+ * silently overwrote distinct photos (found in QA 2026-08-03: 20 index rows,
+ * 12 files on disk). The short row id makes collisions impossible. */
+function photoName(ctx, ts, rowId, n) {
+  return `${ctx}-${compactTs(ts)}-${String(rowId).replace(/-/g, '').slice(0, 8)}-${n}.jpg`;
+}
+
+/* Download every photo referenced by the given rows into photos/, write
+ * index.csv. Used by the live run and by --photos (offline repair: the bucket
+ * is public, so frozen rows are enough to rebuild the set — still GETs only). */
+async function downloadPhotoSet(dir, rosterUnits, issues, movements, unitsById) {
+  const photoJobs = [];
+  for (const u of rosterUnits) (u.photos || []).forEach((p, n) => photoJobs.push({ url: p, ctx: 'unit', ts: u.updated_at, rowId: u.id, unitId: u.id, n }));
+  for (const i of issues) (i.photos || []).forEach((p, n) => photoJobs.push({ url: p, ctx: 'issue', ts: i.ts, rowId: i.id, unitId: i.unit_id, n }));
+  for (const m of movements) (m.photos || []).forEach((p, n) => photoJobs.push({ url: p, ctx: m.kind === 'photo' ? 'placement' : 'move', ts: m.ts, rowId: m.id, unitId: m.unit_id, n }));
+
+  const serialDirs = new Map();  // unitId -> dir name, disambiguated on collision
+  for (const u of rosterUnits) {
+    let d = sanitizeSerial(u.serial || u.tag_id);
+    if ([...serialDirs.values()].includes(d)) d += '-' + String(u.id).replace(/-/g, '').slice(0, 8);
+    serialDirs.set(String(u.id), d);
+  }
+
+  fs.rmSync(path.join(dir, 'photos'), { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, 'photos'), { recursive: true });
+  const photoIndex = [], photoFails = [];
+  for (const j of photoJobs) {
+    const u = unitsById.get(String(j.unitId));
+    const sdir = serialDirs.get(String(j.unitId)) || sanitizeSerial(u && u.serial) || 'unknown-unit';
+    fs.mkdirSync(path.join(dir, 'photos', sdir), { recursive: true });
+    const rel = path.join('photos', sdir, photoName(j.ctx, j.ts, j.rowId, j.n));
+    const r = await downloadPhoto(j.url, path.join(dir, rel));
+    const urlNote = String(j.url).startsWith('data:') ? '(data URI in row)' : j.url;
+    if (r.ok) {
+      photoIndex.push([rel, j.ctx, j.rowId, (u && u.serial) || '', iso(j.ts) || '', urlNote]);
+    } else {
+      photoFails.push({ file: rel, url: urlNote, status: r.status });
+      photoIndex.push([rel + ' (FAILED: ' + r.status + ')', j.ctx, j.rowId, (u && u.serial) || '', iso(j.ts) || '', urlNote]);
+    }
+  }
+  fs.writeFileSync(path.join(dir, 'photos', 'index.csv'),
+    toCsv(['file', 'context', 'source_row_id', 'serial', 'row_timestamp_utc', 'original_url'], photoIndex));
+  return { photoJobs, photoIndex, photoFails };
+}
+
 async function downloadPhoto(url, dest) {
   if (typeof url === 'string' && url.startsWith('data:')) {   // unsynced legacy row: decode, don't fetch
     const i = url.indexOf(',');
@@ -481,36 +528,7 @@ async function archiveShow(show, all, totals, outRoot) {
   }
 
   /* ---- photos: real files, from every row type that can carry them ---- */
-  const photoJobs = [];
-  for (const u of rosterUnits) (u.photos || []).forEach((p, n) => photoJobs.push({ url: p, ctx: 'unit', ts: u.updated_at, rowId: u.id, unitId: u.id, n }));
-  for (const i of issues) (i.photos || []).forEach((p, n) => photoJobs.push({ url: p, ctx: 'issue', ts: i.ts, rowId: i.id, unitId: i.unit_id, n }));
-  for (const m of movements) (m.photos || []).forEach((p, n) => photoJobs.push({ url: p, ctx: m.kind === 'photo' ? 'placement' : 'move', ts: m.ts, rowId: m.id, unitId: m.unit_id, n }));
-
-  const serialDirs = new Map();  // unitId -> dir name, disambiguated on collision
-  for (const u of rosterUnits) {
-    let d = sanitizeSerial(u.serial || u.tag_id);
-    if ([...serialDirs.values()].includes(d)) d += '-' + String(u.id).replace(/-/g, '').slice(0, 8);
-    serialDirs.set(String(u.id), d);
-  }
-
-  const photoIndex = [], photoFails = [];
-  for (const j of photoJobs) {
-    const u = unitsById.get(String(j.unitId));
-    const sdir = serialDirs.get(String(j.unitId)) || sanitizeSerial(u && u.serial) || 'unknown-unit';
-    fs.mkdirSync(path.join(dir, 'photos', sdir), { recursive: true });
-    const file = `${j.ctx}-${compactTs(j.ts)}-${j.n}.jpg`;
-    const rel = path.join('photos', sdir, file);
-    const r = await downloadPhoto(j.url, path.join(dir, rel));
-    const urlNote = String(j.url).startsWith('data:') ? '(data URI in row)' : j.url;
-    if (r.ok) {
-      photoIndex.push([rel, j.ctx, j.rowId, (u && u.serial) || '', iso(j.ts) || '', urlNote]);
-    } else {
-      photoFails.push({ file: rel, url: urlNote, status: r.status });
-      photoIndex.push([rel + ' (FAILED: ' + r.status + ')', j.ctx, j.rowId, (u && u.serial) || '', iso(j.ts) || '', urlNote]);
-    }
-  }
-  fs.writeFileSync(path.join(dir, 'photos', 'index.csv'),
-    toCsv(['file', 'context', 'source_row_id', 'serial', 'row_timestamp_utc', 'original_url'], photoIndex));
+  const { photoJobs, photoFails } = await downloadPhotoSet(dir, rosterUnits, issues, movements, unitsById);
   if (photoFails.length) shortfalls.push(`${photoFails.length} photo download(s) failed — see manifest.photos.failed`);
 
   /* ---- CSVs ---- */
@@ -761,6 +779,14 @@ function selftest() {
   t('name lookup substring', sel.length === 1 && sel[0].id === 'a');
   t('id lookup', selectShows([{ id: 'a' }], { showId: 'a' }).length === 1);
 
+  /* photo filenames: the reclass batch shares ONE ts across rows — names must
+   * still be unique (found overwriting distinct photos in QA 2026-08-03) */
+  const sameTs = '2026-08-01T16:17:45Z';
+  t('same-ts different rows -> different photo files',
+    photoName('placement', sameTs, 'aaaa1111-2222', 0) !== photoName('placement', sameTs, 'bbbb3333-4444', 0));
+  t('same row two photos -> different files',
+    photoName('unit', sameTs, 'aaaa1111', 0) !== photoName('unit', sameTs, 'aaaa1111', 1));
+
   /* ---- timeline ---- */
   t('kva flat', kvaOfUnit({ kw: 100 }) === 100);
   t('kva twin sums live engines', kvaOfUnit({ kw: 80, engines: { A: { kvaEach: 50 }, B: { kvaEach: 50, off: true } } }) === 50);
@@ -845,6 +871,25 @@ function selftest() {
     console.log(`cadence rebuilt for "${show.name}" -> ${path.join(dir, 'cadence.md')} ` +
       `(${tl.meta.days} day rows, phases ${tl.meta.phases_available ? 'on' : 'OFF — no show_days'}, ` +
       `sustained logging from ${tl.meta.sustained_logging_from})`);
+    return;
+  }
+
+  /* --photos <archiveDir>: rebuild photos/ + index.csv from the frozen rows.
+   * The bucket is public, so this needs no credentials — and it exists because
+   * the ts-only filename scheme overwrote same-timestamp photos (QA 2026-08-03). */
+  const ph = opt('--photos');
+  if (ph) {
+    const dir = path.resolve(ph);
+    const rd = (f) => JSON.parse(fs.readFileSync(path.join(dir, 'data', f), 'utf8'));
+    const units = rd('units.json');
+    const unitsById = new Map(units.map((u) => [String(u.id), u]));
+    const r = await downloadPhotoSet(dir, units, rd('issues.json'), rd('movements.json'), unitsById);
+    const mPath = path.join(dir, 'manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(mPath, 'utf8'));
+    manifest.photos = { referenced: r.photoJobs.length, downloaded: r.photoJobs.length - r.photoFails.length, failed: r.photoFails };
+    fs.writeFileSync(mPath, JSON.stringify(manifest, null, 2));
+    console.log(`photos rebuilt: ${r.photoJobs.length - r.photoFails.length}/${r.photoJobs.length} downloaded -> ${path.join(dir, 'photos')}`);
+    if (r.photoFails.length) { r.photoFails.forEach((f) => console.error('FAILED: ' + f.file + ' (' + f.status + ')')); process.exit(2); }
     return;
   }
 
