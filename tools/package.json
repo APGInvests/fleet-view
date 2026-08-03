@@ -1,0 +1,16 @@
+{
+  "name": "tools",
+  "version": "1.0.0",
+  "description": "Test + deploy tooling for the app. **Nothing here is served to the crew** — `index.html` is the entire app; these files are never referenced by it.",
+  "main": "fv_archive.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "pdfkit": "^0.19.1",
+    "sharp": "^0.35.3"
+  }
+}

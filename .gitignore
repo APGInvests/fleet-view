@@ -7,3 +7,7 @@ tools/.fv_state.json
 
 # Personal working context (client + budget details) — never publish
 CLAUDE.md
+
+# tools/ devDependencies (pdfkit + sharp for the archive site map) — installed
+# per-machine with `cd tools && npm install`; the app itself stays dependency-free
+tools/node_modules/

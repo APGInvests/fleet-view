@@ -21,6 +21,8 @@ Primary users: field technicians, a crew chief, and the owner. Multi-user, one s
 
 **One self-contained file.** `index.html` (~130 KB) contains all markup, CSS and JavaScript. Vanilla JS. **No build step, no bundler, no package.json.** Editing the app means editing that one file. This is deliberate: the whole app is one deployable artifact you can diff, verify and roll back in a single operation.
 
+**Scope of the no-dependency rule (settled 2026-08-02):** it protects `index.html` and the no-build-step deploy — *not* the archive tooling. `tools/` carries its own devDependencies (`pdfkit` + `sharp`, for the archive site map; `cd tools && npm install`, `node_modules` gitignored). A missing install never affects a deploy: preflight and the invariant suite stay zero-dependency, and `fv_archive.js` records a loud shortfall instead of silently skipping the map.
+
 **Libraries, all from CDN** (no local deps):
 
 | Library | Version | Used for |

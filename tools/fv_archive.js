@@ -615,9 +615,22 @@ async function archiveShow(show, all, totals, outRoot) {
     fs.writeFileSync(path.join(dir, 'cadence.md'), tl.md);
   }
 
+  /* ---- site map: PDF + page PNGs on embedded NAIP imagery ---- */
+  /* Needs tools/ devDependencies (pdfkit + sharp) and network for the imagery.
+   * A missing install or a dead imagery service is a SHORTFALL (exit 2), never
+   * a silent skip — the map is the artifact people actually open. */
+  let sitemap = null;
+  try {
+    sitemap = await require('./fv_sitemap.js').generate(dir);
+  } catch (e) {
+    shortfalls.push('site map FAILED: ' + ((e && e.message) || e) +
+      ((e && e.code === 'MODULE_NOT_FOUND') ? '  — run: cd tools && npm install' : ''));
+  }
+
   const manifest = {
     tool: TOOL, generated_at: new Date().toISOString(), read_only: 'this tool only issues GETs',
     cadence: tl ? tl.meta : null,
+    sitemap,
     show, evidence_window: { start: iso(win.start), end: iso(win.end) },
     max_source_row_timestamp: iso(maxTs),
     source_table_totals: totals,
@@ -649,6 +662,9 @@ returned them (snake_case); \`data/csv/\` holds the same data flattened for a
 spreadsheet. Photos are real files under \`photos/\`, indexed in \`photos/index.csv\`.
 \`cadence.md\` (and \`data/csv/cadence.csv\`) is the show's day-by-day delivery
 cadence — read its caveats section before quoting any number from it.
+\`sitemap.pdf\` (pages also as \`sitemap-*.png\`) draws every unit's placement on
+embedded satellite imagery — labels are placement text + kVA, never serials;
+pins are the last logged movement, not surveyed positions.
 
 ## Read these before interpreting anything
 
