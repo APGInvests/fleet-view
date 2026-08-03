@@ -15,11 +15,11 @@ module.exports = async (app, t) => {
   t.group('shows map: new columns serialize and round-trip');
   const full = { id: 'show-rt', name: 'Roundtrip Fest', location: 'Chicago, Grant Park',
     startDate: '2026-07-15', showDays: ['2026-07-30', '2026-07-31', '2026-08-01'],
-    pmName: 'Andy P.', cesJobNumber: '26-1042', tz: 'America/Chicago',
+    pmName: 'Sam R.', cesJobNumber: '26-1042', tz: 'America/Chicago',
     site: { lat: 41.87, lng: -87.62, zoom: 16 }, createdAt: 1753000000000, archivedAt: null };
   const row = app.fn.toRow('shows', full);
   t.deep(row.show_days, ['2026-07-30', '2026-07-31', '2026-08-01'], 'show_days serializes as the date array');
-  t.eq(row.pm_name, 'Andy P.', 'pm_name maps');
+  t.eq(row.pm_name, 'Sam R.', 'pm_name maps');
   t.eq(row.ces_job_number, '26-1042', 'ces_job_number maps');
   t.eq(row.tz, 'America/Chicago', 'tz maps');
   t.ok('archived_at' in row, 'archived_at column is always present in the payload');
@@ -53,11 +53,11 @@ module.exports = async (app, t) => {
   app.fn.editShow(sh.id);
   app.document.querySelector('#sh_name').value = 'Roundtrip Fest';
   app.document.querySelector('#sh_start').value = '2026-09-01';
-  app.document.querySelector('#sh_pm').value = ' Andy P. ';
+  app.document.querySelector('#sh_pm').value = ' Sam R. ';
   app.document.querySelector('#sh_job').value = '26-1042';
   app.document.querySelector('#sh_tz').value = 'America/Chicago';
   app.fn.saveShow(sh.id);
-  t.eq(sh.pmName, 'Andy P.', 'PM name trims and saves');
+  t.eq(sh.pmName, 'Sam R.', 'PM name trims and saves');
   t.eq(sh.cesJobNumber, '26-1042', 'job # saves');
   t.eq(sh.tz, 'America/Chicago', 'explicit tz choice wins');
   t.deep(sh.showDays, ['2026-09-05', '2026-09-06'], 'editShow re-seeds the picker from saved days');
@@ -92,6 +92,34 @@ module.exports = async (app, t) => {
   app.fn.openJob(sh.id);
   const detail = app.document.querySelector('#view').innerHTML;
   t.includes(detail, `editShow('${sh.id}')`, 'job detail header carries an Edit hook for this job');
+
+  t.group('show-days calendar: month navigation both ways, with year rollover');
+  const monthLabel = (y, m) => new Date(y, m, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const shownMonth = () => {
+    const mm = String(app.document.querySelector('#sh_cal').innerHTML).match(/<b>([^<]+)<\/b>/);
+    return mm && mm[1];
+  };
+  app.fn.calInit({ showDays: ['2026-08-15'] }); app.fn.renderCal();
+  t.eq(shownMonth(), monthLabel(2026, 7), 'opens on the anchor month');
+  app.fn.calNav(1); t.eq(shownMonth(), monthLabel(2026, 8), 'forward advances one month');
+  app.fn.calNav(-1); t.eq(shownMonth(), monthLabel(2026, 7), 'back returns one month');
+  app.fn.calInit({ showDays: ['2026-12-15'] }); app.fn.renderCal();
+  app.fn.calNav(1); t.eq(shownMonth(), monthLabel(2027, 0), 'December -> January rolls the year forward');
+  app.fn.calInit({ showDays: ['2027-01-10'] }); app.fn.renderCal();
+  app.fn.calNav(-1); t.eq(shownMonth(), monthLabel(2026, 11), 'January -> December rolls the year back');
+
+  t.group('edit-job sheet: no button may nest inside a label');
+  /* The calendar originally lived inside <label class="fld">. A label forwards
+   * activation to its FIRST labelable descendant — the back arrow — so on iOS a
+   * tap on the forward arrow ran calNav(1) and then the label clicked calNav(-1):
+   * net zero, "forward does nothing". The JS was correct; the container was the
+   * bug. No harness can reproduce label semantics, but markup can be guarded. */
+  app.fn.editShow();
+  const sheetHtml = String(app.document.querySelector('#sheet').innerHTML);
+  const labels = sheetHtml.match(/<label[\s\S]*?<\/label>/g) || [];
+  t.ok(labels.length >= 5, 'edit-job sheet renders its labelled fields');
+  t.ok(labels.every((l) => !/<button/i.test(l)), 'no <button> inside any <label> in the edit-job sheet');
+  t.excludes(sheetHtml, 'Andy', 'no real person\'s name in the sheet markup');
 
   t.group('tzGuess: known venue -> known zone, unknown -> null');
   t.eq(app.fn.tzGuess({ lng: -87.62 }), 'America/Chicago', 'Grant Park -> Central');

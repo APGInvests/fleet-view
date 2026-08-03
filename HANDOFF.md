@@ -331,7 +331,7 @@ These were each learned the hard way, several from production bugs.
 
 ## 9. Ship-verify loop (follow this for every change)
 
-Two guards stand behind every deploy, and they are complementary, not interchangeable. The **standing invariant suite** — 750 assertions as of 2026-08-02, `tools/fv_smoke.js` plus every `tools/fv_inv_*.js`, run automatically by preflight, which refuses to clear a broken build — protects the contracts someone has already encoded. The **loop below** catches what no assertion watches yet: the surface you just built, deploy and caching problems, real-device behavior. A green suite is not "shipped", and this discipline without the suite is what let contract regressions slip before the suite existed. Do both.
+Two guards stand behind every deploy, and they are complementary, not interchangeable. The **standing invariant suite** — 759 assertions as of 2026-08-02, `tools/fv_smoke.js` plus every `tools/fv_inv_*.js`, run automatically by preflight, which refuses to clear a broken build — protects the contracts someone has already encoded. The **loop below** catches what no assertion watches yet: the surface you just built, deploy and caching problems, real-device behavior. A green suite is not "shipped", and this discipline without the suite is what let contract regressions slip before the suite existed. Do both.
 
 1. **Read the real current code** for the lines you're changing. Never edit from memory — the file drifts.
 2. Make **one logical change**.
@@ -347,7 +347,7 @@ Two guards stand behind every deploy, and they are complementary, not interchang
    ```bash
    python3 tools/fv_deploy.py preflight -m "what changed"
    ```
-   Auto-loads every `fv_inv_*.js` group, prints `RESULT: PASS (750/750)` (count as of 2026-08-02) and refuses to clear the build on any failure. (Suite only, no preflight wrapper: `node tools/fv_smoke.js index.html tools/fv_inv_*.js`.)
+   Auto-loads every `fv_inv_*.js` group, prints `RESULT: PASS (759/759)` (count as of 2026-08-02) and refuses to clear the build on any failure. (Suite only, no preflight wrapper: `node tools/fv_smoke.js index.html tools/fv_inv_*.js`.)
 6. **Manual regression sweep — narrowed 2026-08-01 to what the suite does not render.** The suite already exercises `renderFleet`, `renderAlerts`, `unitCard`, `paneVitals`, `paneIssues`, `paneService` and `paneMoves` against populated and edge-field fixtures (`fv_inv_fleetcard.js`, `fv_inv_alerts.js`, `fv_inv_bigiron.js`, `fv_inv_status.js`, `fv_inv_placementphotos.js`). Still swept **by hand, in the harness or browser**, because no assertion renders them:
    - `renderJobsList`, `renderJobDetail`, `renderMapScreen`, `paneInfo` — all three states (**empty**, **populated**, **edge**);
    - the **empty** states of `renderFleet` (zero units), `renderAlerts` (nothing alerting), `paneIssues` (no issues) and `paneMoves` (no history);
