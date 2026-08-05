@@ -12,7 +12,7 @@
    - Only the five CDN hosts below are cache-first. Backend requests must never be
      intercepted (auth/realtime/PostgREST all break on cached responses); tiles and
      geocoding pass straight through. */
-const VERSION = 'fv-sw-3';
+const VERSION = 'fv-sw-4';
 const KILL = false;
 const SHELL = VERSION + '-shell', CDN = VERSION + '-cdn';
 const CDN_HOSTS = ['unpkg.com', 'cdn.jsdelivr.net', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];
@@ -70,8 +70,13 @@ async function netFirst(req) {
   const c = await caches.open(SHELL);
   try {
     const res = await fetchWithTimeout(req, 3500);
-    if (res && res.ok) c.put(req, res.clone());
-    return res;
+    if (res && res.ok) { c.put(req, res.clone()); return res; }
+    /* reachable-but-broken origin (mid-deploy 404/500, captive portal, operator
+       error page on a congested network): the cached shell this phone already
+       has beats an error page. Only return the broken response when there is
+       genuinely nothing cached. */
+    const hit = (await c.match(req)) || (await c.match('./index.html'));
+    return hit || res;
   } catch (err) {
     const hit = (await c.match(req)) || (await c.match('./index.html'));
     if (hit) return hit;

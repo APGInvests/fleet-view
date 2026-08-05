@@ -173,4 +173,42 @@ module.exports = async (app, t) => {
   t.ok(firstSelect !== -1 && firstUpsert !== -1, 'reconnect both reloads and flushes');
   t.ok(firstSelect < firstUpsert, 'merge (read) strictly precedes flush (write) on reconnect');
   app.opts.tableData = null;
+
+  t.group('offline cold-start: dead-zone contracts (incident 2026-08-04)');
+  /* An expired token on queued offline work must RETRY (netBack refreshes it),
+   * never quarantine — a 401 here is field data eaten for a self-healing cause. */
+  const R = app.live.RETRYABLE;
+  t.ok(typeof R === 'function', 'RETRYABLE reachable via live binding');
+  t.ok(R({ message: 'JWT expired' }), 'expired JWT is retryable');
+  t.ok(R({ message: 'signal timed out', name: 'AbortError' }) || R({ message: 'AbortError: aborted' }), 'aborted (timed-out) select/upsert is retryable');
+  t.ok(R({ code: '401', message: 'Unauthorized' }), '401 is retryable');
+  t.ok(!R({ message: 'permission denied for table units', code: '42501' }), 'a real RLS denial still quarantines (not retryable)');
+  t.ok(!R({ message: 'column shows.nope does not exist', code: '42703' }), 'schema drift still quarantines (not retryable)');
+
+  // stored-session fallback: previously-signed-in device boots offline
+  app.context.localStorage.setItem('sb-eujgglfcpdfgskyqfggg-auth-token',
+    JSON.stringify({ currentSession: { access_token: 't', user: { id: 'u-off', email: 'tech@ces.com' } } }));
+  const ss = app.fn.storedSession();
+  t.ok(ss && ss.user && ss.user.email === 'tech@ces.com', 'storedSession recovers the persisted session (wrapped form)');
+  app.context.localStorage.setItem('sb-eujgglfcpdfgskyqfggg-auth-token',
+    JSON.stringify({ access_token: 't', user: { id: 'u-off2' } }));
+  t.ok(app.fn.storedSession().user.id === 'u-off2', 'storedSession recovers the persisted session (flat form)');
+  app.context.localStorage.removeItem('sb-eujgglfcpdfgskyqfggg-auth-token');
+  t.eq(app.fn.storedSession(), null, 'no persisted session -> null (auth screen is then correct)');
+
+  // offline empty state: never "create your first show" when the truth is "no signal"
+  app.setState({ shows: [], units: [] });
+  app.live.NET_DOWN = true;
+  const emptyOffline = app.fn.renderJobsList();
+  t.includes(emptyOffline, 'No signal', 'offline empty jobs list says no-signal, not no-jobs');
+  t.excludes(emptyOffline, 'Create your first show', 'offline empty state never invites creating a duplicate fleet');
+  app.live.NET_DOWN = false;
+  t.includes(app.fn.renderJobsList(), 'Create your first show', 'online empty state keeps the create path');
+
+  // the chip tells the truth about offline and about a broken durable cache
+  app.live.NET_DOWN = true; app.live.CACHE_AGE = 1000; app.fn.updateSyncChip();
+  t.includes(app.document.querySelector('#syncChip').textContent, 'offline', 'chip shows offline state');
+  app.live.NET_DOWN = false; app.live.CACHE_BROKEN = true; app.fn.updateSyncChip();
+  t.includes(app.document.querySelector('#syncChip').textContent, 'no offline backup', 'a broken durable cache is LOUD (audit A2)');
+  app.live.CACHE_BROKEN = false; app.fn.updateSyncChip();
 };

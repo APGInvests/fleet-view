@@ -210,6 +210,10 @@ function makeSupabase(calls, opts) {
         rec('eq', { col, val });
         return chain;
       },
+      abortSignal(sig) {
+        rec('abortSignal', null);
+        return chain;
+      },
       then(res) {
         return Promise.resolve({ data: null, error: null }).then(res);
       },
@@ -302,6 +306,7 @@ const LIVE_BINDINGS = [
   'TABLES', 'MAPS', 'DT', 'SC', 'NAV', 'KEY',
   'DEAD', 'KV', 'OFFLINE',
   'SYNC_FAILS', 'SYNC_LOST', 'DEAD',
+  'NET_DOWN', 'CACHE_BROKEN', 'CACHE_AGE', 'RETRYABLE',
 ];
 
 /* ------------------------------------------------------------------ *
