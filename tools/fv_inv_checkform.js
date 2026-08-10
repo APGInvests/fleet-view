@@ -81,4 +81,52 @@ module.exports = async (app, t) => {
   const row2 = app.fn.toRow('reports', r1);
   t.eq(row2.rating_kva, 625, 'persists as rating_kva');
   t.eq(app.fn.fromRow('reports', row2).ratingKva, 625, 'round-trips back');
+
+  t.group('check form: status segment leads; electricals collapse when not running');
+  // The fake-zero fix (2026-08-10): status at the TOP of the form so an off unit
+  // collapses the electrical grid BEFORE anyone types zeros into it. Collapse is
+  // display-only — it must never clear a typed value, and save semantics are
+  // untouched (hidden typed values still save; blank stays not-observed).
+  app.setState({ units: [
+    mkUnit({ id: 'u-run2', klass: 'big', opStatus: 'running' }),
+    mkUnit({ id: 'u-stg2', klass: 'small', opStatus: 'staged' }),
+  ], shows: [{ id: 'show-A', name: 'A' }] });
+  app.S.settings.techName = 'Mike R.';
+  const fakeBtn = (v) => ({ dataset: { v }, classList: { add() {}, remove() {} }, style: {} });
+
+  app.fn.logVitals('u-run2');
+  const f1 = app.document.querySelector('#sheet').innerHTML;
+  t.ok(f1.indexOf('id="v_seg"') !== -1 && f1.indexOf('id="v_seg"') < f1.indexOf('id="v_ll"'),
+    'status segment renders BEFORE the first electrical field');
+  t.includes(f1, 'id="v_elec"', 'electricals live in a collapsible container');
+  const elecBody = f1.slice(f1.indexOf('id="v_elec"'), f1.indexOf('id="v_elecOff"'));
+  ['v_ll', 'v_ln', 'v_a1', 'v_hz', 'v_kw', 'v_ct', 'v_op', 'v_fp'].forEach((fid) =>
+    t.includes(elecBody, fid, fid + ' collapses with the electricals'));
+  ['v_fuel', 'v_bat', 'v_def', 'v_hrs', 'v_notes'].forEach((fid) =>
+    t.excludes(elecBody, fid, fid + ' stays observable on an off unit'));
+  const elec = app.document.querySelector('#v_elec');
+  t.ne(elec.style.display, 'none', 'running unit opens with electricals visible');
+
+  app.document.querySelector('#v_ll').value = '480';
+  app.fn.vseg(fakeBtn('staged'));
+  t.eq(elec.style.display, 'none', 'flipping to staged collapses electricals');
+  t.ne(app.document.querySelector('#v_elecOff').style.display, 'none', 'the n/a line shows instead');
+  t.eq(app.document.querySelector('#v_ll').value, '480', 'collapse never clears a typed value');
+  app.fn.vseg(fakeBtn('running'));
+  t.ne(elec.style.display, 'none', 'flipping back restores the grid');
+  t.eq(app.document.querySelector('#v_ll').value, '480', 'typed value survives the round trip');
+  app.fn.vseg(fakeBtn('down'));
+  t.eq(elec.style.display, 'none', 'down collapses too');
+
+  app.fn.logVitals('u-stg2');
+  t.eq(app.document.querySelector('#v_elec').style.display, 'none', 'a staged unit opens already collapsed');
+
+  // save is untouched by the collapse: hidden-but-typed still saves as typed
+  app.fn.logVitals('u-run2');
+  app.document.querySelector('#v_ll').value = '481';
+  app.document.querySelector('#v_notes').value = '';
+  app.fn.vseg(fakeBtn('staged'));
+  app.fn.saveVitals('u-run2');
+  const rHid = app.S.reports.filter((x) => x.unitId === 'u-run2').slice(-1)[0];
+  t.ok(rHid && rHid.voltageLL === 481, 'hidden typed value still saves (got ' + (rHid && rHid.voltageLL) + ')');
 };
