@@ -129,4 +129,110 @@ module.exports = async (app, t) => {
   app.fn.saveVitals('u-run2');
   const rHid = app.S.reports.filter((x) => x.unitId === 'u-run2').slice(-1)[0];
   t.ok(rHid && rHid.voltageLL === 481, 'hidden typed value still saves (got ' + (rHid && rHid.voltageLL) + ')');
+
+  t.group('check form: "All good" chip — one tap replaces the typed ack');
+  // 81 of 189 archive notes were a typed "Running clean". The chip stores a real
+  // queryable boolean: true when tapped, NULL when not — untapped is "not
+  // asserted", never "not OK". State must reset per form open (no leak between
+  // units), and the canned-ack demand must not create a canned note string.
+  app.setState({ units: [mkUnit({ id: 'u-ag', klass: 'big', opStatus: 'running' })],
+                 shows: [{ id: 'show-A', name: 'A' }] });
+  app.S.settings.techName = 'Mike R.';
+  app.fn.logVitals('u-ag');
+  const fAg = app.document.querySelector('#sheet').innerHTML;
+  t.includes(fAg, 'id="v_allgood"', 'chip renders');
+  t.ok(fAg.indexOf('id="v_allgood"') < fAg.indexOf('id="v_notes"'), 'chip sits above the notes field');
+  t.includes(fAg, 'All good', 'chip says what it means');
+  app.document.querySelector('#v_notes').value = '';
+  app.fn.saveVitals('u-ag');
+  let rAg = app.S.reports.filter((x) => x.unitId === 'u-ag').slice(-1)[0];
+  t.ok(rAg && rAg.conditionOk === null, 'untapped saves NULL — not asserted (got ' + (rAg && rAg.conditionOk) + ')');
+  app.fn.logVitals('u-ag');
+  app.fn.vAllGoodT();
+  app.fn.saveVitals('u-ag');
+  rAg = app.S.reports.filter((x) => x.unitId === 'u-ag').slice(-1)[0];
+  t.ok(rAg && rAg.conditionOk === true, 'tapped saves true (got ' + (rAg && rAg.conditionOk) + ')');
+  t.excludes(String(rAg.notes), 'Running', 'chip writes the boolean, never a canned note');
+  const rowAg = app.fn.toRow('reports', rAg);
+  t.eq(rowAg.condition_ok, true, 'persists as condition_ok');
+  t.eq(app.fn.fromRow('reports', rowAg).conditionOk, true, 'round-trips back');
+  app.fn.logVitals('u-ag');
+  app.fn.vAllGoodT();
+  app.fn.vAllGoodT();
+  app.fn.saveVitals('u-ag');
+  rAg = app.S.reports.filter((x) => x.unitId === 'u-ag').slice(-1)[0];
+  t.ok(rAg.conditionOk === null, 'toggled off saves NULL again (got ' + rAg.conditionOk + ')');
+  app.fn.logVitals('u-ag');
+  app.fn.vAllGoodT();
+  app.fn.logVitals('u-ag');
+  app.fn.saveVitals('u-ag');
+  rAg = app.S.reports.filter((x) => x.unitId === 'u-ag').slice(-1)[0];
+  t.ok(rAg.conditionOk === null, 'reopening the form resets the chip — no leak between checks');
+
+  t.group('check form: gauge-broken picker — a blank becomes a signal, never an auto-issue');
+  // A blank vital is ambiguous: not observed, or unobservable? The picker stores
+  // WHICH gauges are broken (reports.broken_gauges, array of field keys) so the
+  // blank reads as deliberate. Contracts: no issue row is ever auto-created
+  // (six instrument rows would bury the one real hard-down, and an auto-write
+  // with a tech's name on it is how trust dies); the derived badge clears by
+  // construction when a LATER check fills that field with a real value.
+  app.setState({ units: [mkUnit({ id: 'u-gg', klass: 'big', opStatus: 'running' })],
+                 shows: [{ id: 'show-A', name: 'A' }] });
+  app.S.settings.techName = 'Mike R.';
+  app.fn.logVitals('u-gg');
+  const fGg = app.document.querySelector('#sheet').innerHTML;
+  t.includes(fGg, 'id="v_gaugechip"', 'picker chip renders');
+  t.includes(fGg, 'Gauge broken', 'chip says what it means');
+  t.includes(fGg, 'id="v_gpanel"', 'inline panel exists (never a second sheet — the form must not lose typed values)');
+  app.document.querySelector('#v_notes').value = '';
+  app.fn.saveVitals('u-gg');
+  let rGg = app.S.reports.filter((x) => x.unitId === 'u-gg').slice(-1)[0];
+  t.ok(rGg && rGg.brokenGauges === null, 'nothing flagged saves NULL (got ' + JSON.stringify(rGg && rGg.brokenGauges) + ')');
+  const issuesBefore = app.S.issues.length;
+  app.fn.logVitals('u-gg');
+  app.fn.gaugeT('oil_pressure');
+  app.fn.saveVitals('u-gg');
+  rGg = app.S.reports.filter((x) => x.unitId === 'u-gg').slice(-1)[0];
+  t.deep(rGg.brokenGauges, ['oil_pressure'], 'flagged gauge saves as its field key');
+  t.eq(app.S.issues.length, issuesBefore, 'saving a broken-gauge flag NEVER auto-creates an issue row');
+  const rowGg = app.fn.toRow('reports', rGg);
+  t.deep(rowGg.broken_gauges, ['oil_pressure'], 'persists as broken_gauges');
+  t.deep(app.fn.fromRow('reports', rowGg).brokenGauges, ['oil_pressure'], 'round-trips back');
+  app.fn.logVitals('u-gg');
+  app.fn.saveVitals('u-gg');
+  rGg = app.S.reports.filter((x) => x.unitId === 'u-gg').slice(-1)[0];
+  t.ok(rGg.brokenGauges === null, 'reopening the form resets the picker — no leak between checks');
+
+  t.group('gauge badge: derived from checks, cleared by construction');
+  const uGg = app.S.units.find((x) => x.id === 'u-gg');
+  app.S.reports = [{ id: 'g1', unitId: 'u-gg', timestamp: 1000, brokenGauges: ['oil_pressure'] }];
+  t.deep(app.fn.brokenGaugesFor(uGg), ['oil_pressure'], 'a flagged gauge reads broken');
+  app.S.reports.push({ id: 'g2', unitId: 'u-gg', timestamp: 2000, notes: 'walked by' });
+  t.deep(app.fn.brokenGaugesFor(uGg), ['oil_pressure'], 'a later check WITHOUT a value does not clear it');
+  app.S.reports.push({ id: 'g3', unitId: 'u-gg', timestamp: 3000, oilPressure: 42 });
+  t.deep(app.fn.brokenGaugesFor(uGg), [], 'a later real reading clears it — no resolve flow, nothing mutates');
+  app.S.reports.push({ id: 'g4', unitId: 'u-gg', timestamp: 4000, brokenGauges: ['battery_v'], batteryV: 26 });
+  t.deep(app.fn.brokenGaugesFor(uGg), ['battery_v'], 'a report that flags AND carries a value: the explicit flag wins; only a LATER reading clears');
+  const cardOne = app.fn.unitCard(uGg, 'show-A');
+  t.includes(cardOne, 'batt V gauge u/s', 'unit card shows the amber badge');
+  app.S.reports.push({ id: 'g5', unitId: 'u-gg', timestamp: 5000, brokenGauges: ['oil_pressure'] });
+  t.includes(app.fn.unitCard(uGg, 'show-A'), '2 gauges u/s', 'multiple broken gauges collapse to a count');
+  app.S.reports.push({ id: 'g6', unitId: 'u-gg', timestamp: 6000, oilPressure: 40, batteryV: 26.5 });
+  t.excludes(app.fn.unitCard(uGg, 'show-A'), 'u/s', 'badge gone once later readings land');
+
+  t.group('gauge picker: "Also file as issue" is the tech\'s tap, with the tech\'s name');
+  app.S.reports = [];
+  app.fn.logVitals('u-gg');
+  app.fn.gaugeT('oil_pressure');
+  const nIss = app.S.issues.length, nSe = (app.S.status_events || []).length;
+  app.fn.gaugeIssue('u-gg');
+  t.eq(app.S.issues.length, nIss + 1, 'one tap files one issue');
+  const gi = app.S.issues.slice(-1)[0];
+  t.eq(gi.severity, 'maintenance', 'severity is maintenance, never down');
+  t.includes(gi.title, 'gauge', 'title names the gauge problem');
+  t.includes(gi.title, 'Oil psi', 'title names WHICH gauge');
+  t.eq(gi.resolved, false, 'opens unresolved');
+  t.eq(gi.techName, 'Mike R.', 'stamped with the tech who tapped');
+  t.eq(uGg.opStatus, 'running', 'filing a gauge issue moves nothing — unit status untouched');
+  t.eq((app.S.status_events || []).length, nSe, 'and no status event is written');
 };

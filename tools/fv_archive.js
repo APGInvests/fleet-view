@@ -556,10 +556,11 @@ async function archiveShow(show, all, totals, outRoot) {
   fs.writeFileSync(path.join(dir, 'data', 'csv', 'checks.csv'), toCsv(
     ['ts_utc', 'serial', 'engine', 'tech_name', 'attribution', 'voltage_ll', 'voltage_ln', 'amps_l1', 'amps_l2', 'amps_l3', 'hz',
       'load_kw', 'load_pct', 'rating_kva', 'coolant_temp', 'oil_pressure', 'fuel_psi', 'fuel_level_pct', 'battery_v', 'def_pct',
-      'engine_hours', 'notes', 'unit_id', 'report_id'],
+      'engine_hours', 'condition_ok', 'broken_gauges', 'notes', 'unit_id', 'report_id'],
     checks.map((r) => [iso(r.ts), serialOf(r.unit_id), r.engine || '', r.tech_name || '', attribution(r),
       r.voltage_ll, r.voltage_ln, r.amps_l1, r.amps_l2, r.amps_l3, r.hz, r.load_kw, r.load_pct, r.rating_kva,
       r.coolant_temp, r.oil_pressure, r.fuel_psi, r.fuel_level_pct, r.battery_v, r.def_pct, r.engine_hours,
+      r.condition_ok === true ? 'yes' : '', Array.isArray(r.broken_gauges) ? r.broken_gauges.join('; ') : '',
       r.notes || '', r.unit_id, r.id]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))));
 
   fs.writeFileSync(path.join(dir, 'data', 'csv', 'issues.csv'), toCsv(
@@ -745,6 +746,8 @@ pins are the last logged movement, not surveyed positions.
 | units.location_type/-id | Where the unit stood **at archive time**, not during the show |
 | reports.* | One vital-sign check. Every field optional — blank means not observed, never zero |
 | reports.oil_pressure / fuel_psi | psi. fuel_psi is big-iron only (clogging-filter diagnostic) |
+| reports.condition_ok | \`true\` = tech tapped "All good" — a positive OK assertion. Blank = not asserted, NEVER "not OK" |
+| reports.broken_gauges | Field keys the tech flagged as broken instruments (\`voltage\`/\`amps\` cover their leg groups). A blank vital + its key here = gauge broken, not "not observed". Cleared by a later check recording a real value on that gauge |
 | reports.engine_hours | Meter reading at check time — the source for runtime deltas |
 | issues.severity | 'cosmetic' / 'maintenance' / 'down' |
 | movements.from/to_type | 'show' / 'shop' / 'transit' / 'fleet' (= unassigned) |
