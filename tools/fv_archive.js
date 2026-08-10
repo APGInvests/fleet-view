@@ -328,6 +328,8 @@ function buildCadence(show, scoped, notes, win) {
   if (wentNegative) caveats.push('kVA-on-site goes NEGATIVE at some point: departures were logged for arrivals that never were (lost or never-logged movement writes). Treat on-site totals as a floor.');
   caveats.push(`Counts end at the archive's evidence window (${iso(win && win.end)}); re-run the archive after load-out to capture the tail.`);
   caveats.push('status_running/down_events count TRANSITION events, which are sparse — they are not "units running that day".');
+  caveats.push('Paralleled big iron (stage banks): a load reading reflects how many bank members were online when the tech walked by, not unit sizing. ' +
+    'Redundancy is the spec on stages — low big-iron load % is never a downsizing case. See the data dictionary.');
   for (const n of notes || []) caveats.push(n);
 
   const fmtRow = (r) => `| ${r.date}${r.pre ? ' †' : ''} | ${r.dayN ?? ''} | ${r.phase ?? ''} | ${r.placed || ''} | ${r.kvaPlaced ? Math.round(r.kvaPlaced) : ''} | ${r.kvaOnSite || ''} | ${r.checks || ''} | ${r.issues || ''} | ${r.run || ''} | ${r.down || ''} |`;
@@ -706,6 +708,15 @@ pins are the last logged movement, not surveyed positions.
 - **Load %** was derived at check time: \`round(load_kw / (rating_kva × 0.8) × 100)\`
   (0.8 assumed power factor). Each check stamps the \`rating_kva\` it used, so the
   stored percentage is self-describing even if ratings change later.
+- **Paralleled big iron: load % reflects bank state at observation time, not unit
+  sizing.** Large stages run banks of paralleled machines (e.g. four 500s on one
+  stage) brought online in steps — one machine through early build, two during
+  programming, all of them doors-to-close — and the bank is sized to absorb
+  transients (bass + video + audio hitting together) with redundancy as the spec.
+  A check on one bank member records the load it happened to carry with however
+  many mates were online at that moment. Low load % on stage/paralleled iron is
+  the spec working. It is NOT evidence of oversizing and must never be read as a
+  downsizing case. Sizing conclusions are only valid for standalone units.
 - **TwinPak** (\`engines\` json present and not \`"off": true\`): one trailer, two
   engines, one serial. Per-engine fields live in \`engines.A\` / \`engines.B\`
   (\`kvaEach\`, \`serviceDueHours\`, \`lastServiceHours\`, \`opStatus\`). Checks and
