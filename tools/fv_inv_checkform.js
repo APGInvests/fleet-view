@@ -235,4 +235,63 @@ module.exports = async (app, t) => {
   t.eq(gi.techName, 'Mike R.', 'stamped with the tech who tapped');
   t.eq(uGg.opStatus, 'running', 'filing a gauge issue moves nothing — unit status untouched');
   t.eq((app.S.status_events || []).length, nSe, 'and no status event is written');
+
+  t.group('check form: DEF is opt-in per unit — small iron hides it unless flagged');
+  // Most skids have no DEF. units.has_def (null = off) gates the field on small
+  // iron: hidden, not grayed — the point is a SHORTER form. Big iron unchanged
+  // until the per-model spec list exists. The gauge picker follows the field:
+  // you can't flag a gauge the machine doesn't have.
+  app.setState({ units: [
+    mkUnit({ id: 'u-sd', klass: 'small' }),
+    mkUnit({ id: 'u-sy', klass: 'small', hasDef: true }),
+    mkUnit({ id: 'u-bd', klass: 'big' }),
+  ], shows: [{ id: 'show-A', name: 'A' }] });
+  app.S.settings.techName = 'Mike R.';
+  app.fn.logVitals('u-sd');
+  const fSd = app.document.querySelector('#sheet').innerHTML;
+  t.excludes(fSd, 'v_def', 'small iron without DEF: no field');
+  t.excludes(fSd, 'DEF %', 'and no label');
+  t.includes(fSd, 'grid2"><label class="fld"><span class="lb">Fuel %', 'fuel/batt row drops to grid2 — shorter form, not a gap');
+  t.excludes(fSd, 'vg_def_pct', 'gauge picker does not offer DEF');
+  app.document.querySelector('#v_def').value = '55'; // stale cache from an earlier form must not leak into the save
+  app.document.querySelector('#v_notes').value = '';
+  app.fn.saveVitals('u-sd');
+  let rSd = app.S.reports.filter((x) => x.unitId === 'u-sd').slice(-1)[0];
+  t.ok(rSd && rSd.defPct === null, 'no-DEF unit stores NULL even with a stale field value around (got ' + (rSd && rSd.defPct) + ')');
+  app.fn.logVitals('u-sy');
+  const fSy = app.document.querySelector('#sheet').innerHTML;
+  t.includes(fSy, 'v_def', 'small iron WITH has_def: field renders');
+  t.includes(fSy, 'grid3"><label class="fld"><span class="lb">Fuel %', 'fuel/batt/DEF row back to grid3');
+  t.includes(fSy, 'vg_def_pct', 'gauge picker offers DEF again');
+  app.document.querySelector('#v_def').value = '42';
+  app.fn.saveVitals('u-sy');
+  const rSy = app.S.reports.filter((x) => x.unitId === 'u-sy').slice(-1)[0];
+  t.ok(rSy && rSy.defPct === 42, 'and its DEF reading saves (got ' + (rSy && rSy.defPct) + ')');
+  app.fn.logVitals('u-bd');
+  const fBd = app.document.querySelector('#sheet').innerHTML;
+  t.includes(fBd, 'v_def', 'big iron unchanged: DEF renders regardless of has_def');
+  t.includes(fBd, 'vg_def_pct', 'big iron picker unchanged');
+
+  t.group('unit edit: Has DEF toggle — small iron only, a machine property not an observation');
+  const rowU = app.fn.toRow('units', { id: 'x', hasDef: true });
+  t.eq(rowU.has_def, true, 'persists as has_def');
+  t.eq(app.fn.fromRow('units', rowU).hasDef, true, 'round-trips back');
+  app.fn.editUnit('u-sd');
+  t.includes(app.document.querySelector('#sheet').innerHTML, 'id="f_hasdef"', 'toggle renders on small iron');
+  app.fn.editUnit('u-bd');
+  t.excludes(app.document.querySelector('#sheet').innerHTML, 'id="f_hasdef"', 'big iron shows no toggle — that list arrives separately');
+  const uSd = app.S.units.find((x) => x.id === 'u-sd');
+  app.fn.editUnit('u-sd');
+  app.document.querySelector('#f_serial').value = 'DEFTEST-1';
+  app.document.querySelector('#f_tag').value = '';
+  app.fn.hasDefT();
+  app.fn.saveUnit('u-sd');
+  t.eq(uSd.hasDef, true, 'flipped on and saved');
+  app.fn.editUnit('u-sd');
+  app.fn.saveUnit('u-sd');
+  t.eq(uSd.hasDef, true, 'reopening and saving untouched must not silently clear it');
+  app.fn.editUnit('u-sd');
+  app.fn.hasDefT();
+  app.fn.saveUnit('u-sd');
+  t.ok(uSd.hasDef == null, 'flipped off saves null — off is absence, not false (got ' + uSd.hasDef + ')');
 };

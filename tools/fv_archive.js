@@ -543,14 +543,14 @@ async function archiveShow(show, all, totals, outRoot) {
     for (const m of movements) if (m.unit_id === id && m.ts) { const t = Date.parse(m.ts); if (first === null || t < first) first = t; if (last === null || t > last) last = t; }
     for (const r of checks) if (r.unit_id === id && r.ts) { const t = Date.parse(r.ts); if (first === null || t < first) first = t; if (last === null || t > last) last = t; }
     return [u.serial || '', u.tag_id || '', u.klass || '', u.make || '', u.model || '', u.kw != null ? u.kw : '',
-      isTwin(u) ? 'yes' : '', u.engines ? JSON.stringify(u.engines) : '',
+      isTwin(u) ? 'yes' : '', u.has_def === true ? 'yes' : '', u.engines ? JSON.stringify(u.engines) : '',
       jm.name || '', jm.area || '', jm.note || '',
       [...e.sources].join('; '), e.movement_confirmed ? 'yes' : 'NO — weak evidence only (see dictionary)',
       iso(first) || '', iso(last) || '',
       locName(u.location_type, u.location_id, showsById, shopsById), id];
   }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   fs.writeFileSync(path.join(dir, 'data', 'csv', 'roster.csv'), toCsv(
-    ['serial', 'tag_id', 'class', 'make', 'model', 'kva_rating', 'twinpak', 'engines_json', 'job_name', 'placement', 'job_note',
+    ['serial', 'tag_id', 'class', 'make', 'model', 'kva_rating', 'twinpak', 'has_def', 'engines_json', 'job_name', 'placement', 'job_note',
       'roster_evidence', 'movement_confirmed', 'first_seen_utc', 'last_seen_utc', 'location_at_archive_time', 'unit_id'], rosterRows));
 
   fs.writeFileSync(path.join(dir, 'data', 'csv', 'checks.csv'), toCsv(
@@ -742,6 +742,7 @@ pins are the last logged movement, not surveyed positions.
 | units.kw | Rating in **kVA** (legacy name) |
 | units.klass | 'big' or 'small' iron |
 | units.tag_id | Barcode/scan code when it differs from the serial — a shortcut, never a second identity |
+| units.has_def | \`yes\` = unit has a DEF tank (per-unit flag, small iron; blank = no/unknown). Gates the DEF % field on the check form — blank def_pct on a no-DEF unit is structural, not skipped. Future model-to-spec table backfills from this |
 | units.op_status | 'staged' / 'running' / 'down' at archive time (TwinPak: per-engine in engines json) |
 | units.location_type/-id | Where the unit stood **at archive time**, not during the show |
 | reports.* | One vital-sign check. Every field optional — blank means not observed, never zero |
