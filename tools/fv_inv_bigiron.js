@@ -247,7 +247,13 @@ module.exports = async (app, t) => {
   clear('v_kw', 'v_hrs', 'v_notes', 'v_ll', 'v_ln', 'v_a1', 'v_a2', 'v_a3', 'v_hz', 'v_ct', 'v_op', 'v_fuel', 'v_bat', 'v_def');
   F.logVitals('tw', 'A');
   F.saveVitals('tw', 'A');
-  t.eq(app.S.reports.length, 1, 'a completely blank check on a TwinPak still saves');
+  /* Contract amended 2026-08-10 (Andy-approved): a blank check stays POSSIBLE —
+     a tech standing there is a real record — but never accidental. First tap
+     arms the confirm, second tap saves. Still no required field, still never
+     blocked. */
+  t.eq(app.S.reports.length, 0, 'first tap on an all-blank check arms the confirm instead of saving');
+  F.saveVitals('tw', 'A');
+  t.eq(app.S.reports.length, 1, 'second tap saves the blank check — a visit is a real record');
   r = app.S.reports[0];
   t.eq(r.engineHours, null, 'blank hours stay blank, not zero');
   t.eq(r.engine, 'A', 'the engine tag is still recorded');

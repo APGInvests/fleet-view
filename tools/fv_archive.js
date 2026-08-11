@@ -553,7 +553,7 @@ async function archiveShow(show, all, totals, outRoot) {
     const jm = jobMetaOf(u, showId);
     let first = null, last = null;
     for (const m of movements) if (m.unit_id === id && m.ts) { const t = Date.parse(m.ts); if (first === null || t < first) first = t; if (last === null || t > last) last = t; }
-    for (const r of checks) if (r.unit_id === id && r.ts) { const t = Date.parse(r.ts); if (first === null || t < first) first = t; if (last === null || t > last) last = t; }
+    for (const r of checks) if (r.unit_id === id && r.ts && !r.voided_at) { const t = Date.parse(r.ts); if (first === null || t < first) first = t; if (last === null || t > last) last = t; }
     return [u.serial || '', u.tag_id || '', u.klass || '', u.make || '', u.model || '', u.kw != null ? u.kw : '',
       isTwin(u) ? 'yes' : '', u.has_def === true ? 'yes' : '', u.engines ? JSON.stringify(u.engines) : '',
       jm.name || '', jm.area || '', jm.note || '',
@@ -568,12 +568,12 @@ async function archiveShow(show, all, totals, outRoot) {
   fs.writeFileSync(path.join(dir, 'data', 'csv', 'checks.csv'), toCsv(
     ['ts_utc', 'serial', 'engine', 'tech_name', 'attribution', 'voltage_ll', 'voltage_ln', 'amps_l1', 'amps_l2', 'amps_l3', 'hz',
       'load_kw', 'load_pct', 'load_pct_derived', 'rating_kva', 'coolant_temp', 'oil_pressure', 'fuel_psi', 'fuel_level_pct', 'battery_v', 'def_pct',
-      'engine_hours', 'condition_ok', 'broken_gauges', 'notes', 'unit_id', 'report_id'],
+      'engine_hours', 'condition_ok', 'broken_gauges', 'notes', 'voided_at', 'voided_by', 'unit_id', 'report_id'],
     checks.map((r) => [iso(r.ts), serialOf(r.unit_id), r.engine || '', r.tech_name || '', attribution(r),
       r.voltage_ll, r.voltage_ln, r.amps_l1, r.amps_l2, r.amps_l3, r.hz, r.load_kw, r.load_pct, derivedLoadPct(r) ?? '', r.rating_kva,
       r.coolant_temp, r.oil_pressure, r.fuel_psi, r.fuel_level_pct, r.battery_v, r.def_pct, r.engine_hours,
       r.condition_ok === true ? 'yes' : '', Array.isArray(r.broken_gauges) ? r.broken_gauges.join('; ') : '',
-      r.notes || '', r.unit_id, r.id]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))));
+      r.notes || '', r.voided_at || '', r.voided_by || '', r.unit_id, r.id]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))));
 
   fs.writeFileSync(path.join(dir, 'data', 'csv', 'issues.csv'), toCsv(
     ['ts_utc', 'serial', 'engine', 'severity', 'title', 'text', 'tech_name', 'resolved', 'attribution', 'photo_count', 'unit_id', 'issue_id'],
@@ -642,7 +642,7 @@ async function archiveShow(show, all, totals, outRoot) {
    * 2027 reader never finds two names for the same content. */
   fs.rmSync(path.join(dir, 'timeline.md'), { force: true });
   fs.rmSync(path.join(dir, 'data', 'csv', 'timeline.csv'), { force: true });
-  const tl = buildCadence(show, { movements, checks, issues, statusEvents, unitsById }, notes, win);
+  const tl = buildCadence(show, { movements, checks: checks.filter((c) => !c.voided_at), issues, statusEvents, unitsById }, notes, win);
   if (tl) {
     fs.writeFileSync(path.join(dir, 'data', 'csv', 'cadence.csv'), tl.csv);
     fs.writeFileSync(path.join(dir, 'cadence.md'), tl.md);
@@ -728,6 +728,11 @@ pins are the last logged movement, not surveyed positions.
   \`load_pct\` equals this x PF/0.8, so derived reads up to ~20% low when true PF
   is high; direction known). Recomputed on every archive run — a formula change
   re-derives every past check. Never merge it silently with \`load_pct\`.
+- **Voided checks** (\`voided_at\`/\`voided_by\` set) were retracted by their own
+  tech within 10 minutes of filing, while still the newest record on the unit.
+  The rows stay here — raw data keeps everything — but they are EXCLUDED from
+  cadence counts, roster first/last-seen, and every derived number. Exclude
+  them from any analysis of readings; they are a record of a retraction only.
 - **Paralleled big iron: load % reflects bank state at observation time, not unit
   sizing.** Large stages run banks of paralleled machines (e.g. four 500s on one
   stage) brought online in steps — one machine through early build, two during

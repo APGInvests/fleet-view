@@ -40,6 +40,7 @@ module.exports = async (app, t) => {
   t.eq(app.fn.fromRow('reports', row).fuelPsi, 101, 'round-trips back');
   app.document.querySelector('#v_fp').value = '';
   app.fn.logVitals('u-small');
+  app.document.querySelector('#v_hz').value = '60'; // a real reading — blank checks arm the two-tap confirm instead
   app.fn.saveVitals('u-small');
   const rs = app.S.reports.find((x) => x.unitId === 'u-small');
   t.ok(rs && rs.fuelPsi == null, 'small iron check stores null, never a value');
@@ -69,6 +70,7 @@ module.exports = async (app, t) => {
   app.S.settings.techName = 'Mike R.';
   const check = (uid2, eng, expect, label) => {
     app.fn.logVitals(uid2, eng);
+    app.document.querySelector('#v_hz').value = '60'; // a real reading — blank checks arm the two-tap confirm instead
     app.fn.saveVitals(uid2, eng || undefined);
     const rr = app.S.reports.filter((x) => x.unitId === uid2).slice(-1)[0];
     t.ok(rr && (expect === null ? rr.ratingKva === null : rr.ratingKva === expect),
@@ -325,4 +327,59 @@ module.exports = async (app, t) => {
   t.includes(tbl3, '~50', 'derived reading is marked with ~');
   t.includes(tbl3, 'est', 'and labeled est');
   t.excludes(tbl3, '~40', 'metered reading carries no derived marker');
+
+  t.group('void: filer-only, 10 min, still-latest — the record heals, never rewrites');
+  // Void is voided_at/voided_by set on the SAME row (append-only respected, no
+  // separate event to race its own check offline). Only the tail of a unit's
+  // record is voidable, so nothing downstream ever anchored to a voided row:
+  // reportsFor() is the one choke point and every derived reader flows through
+  // it — freshness, hours, fuel, trends — while raw data keeps the row marked.
+  const T0 = Date.now();
+  app.setState({ units: [mkUnit({ id: 'u-vd', klass: 'small', currentHours: 9999 })],
+                 shows: [{ id: 'show-A', name: 'A' }] });
+  app.S.settings.techName = 'Mike R.';
+  app.S.reports = [
+    { id: 'v-old', unitId: 'u-vd', techName: 'Mike R.', timestamp: T0 - 20 * 60e3, engineHours: 100 },
+    { id: 'v-new', unitId: 'u-vd', techName: 'Mike R.', timestamp: T0 - 2 * 60e3, engineHours: 9999 },
+  ];
+  const uVd = app.S.units.find((x) => x.id === 'u-vd');
+  const cand = app.fn.voidableReport(uVd, null);
+  t.ok(cand && cand.id === 'v-new', 'the tech\'s fresh latest check is voidable');
+  t.includes(app.fn.paneVitals(uVd), 'Void my check', 'the affordance renders in the vitals pane');
+  app.fn.voidCheck('v-new', 'u-vd');
+  const rV = app.S.reports.find((x) => x.id === 'v-new');
+  t.ok(rV.voidedAt != null, 'row stays, marked voided — never deleted');
+  t.eq(rV.voidedBy, 'Mike R.', 'stamped with who voided');
+  t.eq(app.S.reports.length, 2, 'append-only: no row removed');
+  t.eq(app.fn.reportsFor('u-vd').length, 1, 'voided row leaves every derived reader');
+  t.eq(app.fn.lastReport('u-vd').id, 'v-old', 'latest check heals to the prior one');
+  t.eq(app.fn.lastRecordedHours(uVd, null).hrs, 100, 'hours guard now compares against the pre-void reading');
+  t.eq(uVd.currentHours, 100, 'the cached hours roll back to the surviving reading');
+  const rowV = app.fn.toRow('reports', rV);
+  t.ok(typeof rowV.voided_at === 'string', 'voided_at persists as ISO (dt-mapped)');
+  t.eq(app.fn.fromRow('reports', rowV).voidedAt, rV.voidedAt, 'and round-trips back to ms');
+  t.excludes(app.fn.paneVitals(uVd), 'Void my check', 'v-old is 20 min old — outside the window, no affordance');
+
+  app.S.reports.push({ id: 'v-w1', unitId: 'u-vd', techName: 'Dana', timestamp: T0 - 60e3 });
+  t.ok(!app.fn.voidableReport(uVd, null), 'someone else\'s check is never yours to void');
+  app.S.reports.push({ id: 'v-w2', unitId: 'u-vd', techName: 'Mike R.', timestamp: T0 - 30e3 });
+  app.S.issues.push({ id: 'v-i1', unitId: 'u-vd', timestamp: T0, severity: 'cosmetic', title: 'x', resolved: false });
+  t.ok(!app.fn.voidableReport(uVd, null), 'a newer issue closes the window — someone built on this check');
+
+  t.group('empty check: two-tap confirm — a visit is real, an accident is not');
+  app.setState({ units: [mkUnit({ id: 'u-mt', klass: 'small', opStatus: 'running' })],
+                 shows: [{ id: 'show-A', name: 'A' }] });
+  app.S.settings.techName = 'Mike R.';
+  app.fn.logVitals('u-mt');
+  ['v_ll', 'v_ln', 'v_a1', 'v_a2', 'v_a3', 'v_hz', 'v_kw', 'v_ct', 'v_op', 'v_fp', 'v_fuel', 'v_bat', 'v_def', 'v_hrs', 'v_notes'].forEach(
+    (fid) => { app.document.querySelector('#' + fid).value = ''; });
+  const n0 = app.S.reports.length;
+  app.fn.saveVitals('u-mt');
+  t.eq(app.S.reports.length, n0, 'first tap on an all-blank check saves nothing');
+  app.fn.saveVitals('u-mt');
+  t.eq(app.S.reports.length, n0 + 1, 'second tap saves it — a tech standing there is a real record');
+  app.fn.logVitals('u-mt');
+  app.document.querySelector('#v_ll').value = '480';
+  app.fn.saveVitals('u-mt');
+  t.eq(app.S.reports.length, n0 + 2, 'any real reading saves on the first tap — happy path untouched');
 };
