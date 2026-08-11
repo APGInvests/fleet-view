@@ -286,7 +286,7 @@ The owner repeatedly declined features to keep the app usable. Every item below 
 - **Autofill/prefill of vital readings** — see §8, rule 2
 - Push / SMS / email alerting infrastructure (in-app Alerts is enough)
 - Roles & permissions
-- CSV import/export
+- **CSV import/export** (settled 2026-08-11 — this previously also appeared in §10 as Phase 2; cut wins). Rationale: bulk pre-loads are one-time events, done by an operator with tooling (the NES import in `docs/nes-import.sql` is the precedent), not a recurring in-app workflow a tech would ever touch. The §10 manifest report keeps its own copy/CSV *output*; that is a share format, not an import surface.
 
 > Before adding a feature, check this list and §10. The bar is: does a tired tech on a phone need this in the core loop?
 
@@ -431,7 +431,7 @@ Ordered roughly by value. All are unbuilt and all were deliberately deferred —
 5. **Runtime per show** — hours-run delta from logged engine hours.
 6. **Fast-load actions** — optional "lock to this destination" for single-truck scanning, receive-a-truckload, multi-select move.
 7. ~~Photos → Supabase Storage~~ — **shipped 2026-07-30** (see §7).
-8. **CSV import/export** — bulk-load an existing fleet; export the manifest.
+8. ~~**CSV import/export**~~ — **cut 2026-08-11**, resolving this doc's own contradiction with §6 (owner call: bulk loads are one-time operator jobs, done with tooling like the NES import — never an app feature). Manifest export lives inside item 2, unaffected.
 
 **Phase 3**
 9. **Zone-scoped alerts.** A project manager defines a job's zone list (~12 max); crew claim zones and receive only their zone's units and alerts. Value: shift handoff (morning/swing/night read the same zone log with no verbal handoff) and accountability (nobody checks 96 units; a tech assigned 12 does). **Blocked until zones are a defined pick-list, not free text** — see §8 rule 11. Requires a small migration (zone list + zone→owner map on the show), wiring the unused `profiles` table for names, and scoping the Alerts screen + badge.
