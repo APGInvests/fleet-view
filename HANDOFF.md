@@ -3,7 +3,7 @@
 **Status:** live and in beta use by a real crew. Treat the data as production.
 **Live URL:** https://apginvests.github.io/fleet-view/
 **Repo:** `APGInvests/fleet-view` (name is case-sensitive), GitHub Pages from `main`, root.
-**This document assumes no prior context.** Written 2026-07-29.
+**This document assumes no prior context.** Written 2026-07-29, last updated 2026-08-11.
 
 ---
 
@@ -19,7 +19,7 @@ Primary users: field technicians, a crew chief, and the owner. Multi-user, one s
 
 ## 2. Architecture
 
-**One self-contained file.** `index.html` (~130 KB) contains all markup, CSS and JavaScript. Vanilla JS. **No build step, no bundler, no package.json.** Editing the app means editing that one file. This is deliberate: the whole app is one deployable artifact you can diff, verify and roll back in a single operation.
+**One self-contained file.** `index.html` (~215 KB) contains all markup, CSS and JavaScript. Vanilla JS. **No build step, no bundler, no package.json.** Editing the app means editing that one file. This is deliberate: the whole app is one deployable artifact you can diff, verify and roll back in a single operation.
 
 **Scope of the no-dependency rule (settled 2026-08-02):** it protects `index.html` and the no-build-step deploy — *not* the archive tooling. `tools/` carries its own devDependencies (`pdfkit` + `sharp`, for the archive site map; `cd tools && npm install`, `node_modules` gitignored). A missing install never affects a deploy: preflight and the invariant suite stay zero-dependency, and `fv_archive.js` records a loud shortfall instead of silently skipping the map.
 
@@ -43,7 +43,7 @@ S = { settings, shops[], shows[], units[], reports[], issues[], movements[], cur
 Render functions read `S` and rebuild DOM via template strings. There is no framework and no virtual DOM — `render()` rewrites the view container.
 
 **Build marker.** An HTML comment near `<title>`:
-`<!-- fleetview build 2026-07-29 serial-caps -->`
+`<!-- fleetview build 2026-08-11 check-history -->`
 Bump it on every deploy. See §9.
 
 ---
@@ -351,7 +351,7 @@ These were each learned the hard way, several from production bugs.
 
 ## 9. Ship-verify loop (follow this for every change)
 
-Two guards stand behind every deploy, and they are complementary, not interchangeable. The **standing invariant suite** — 798 assertions as of 2026-08-05, `tools/fv_smoke.js` plus every `tools/fv_inv_*.js`, run automatically by preflight, which refuses to clear a broken build — protects the contracts someone has already encoded. The **loop below** catches what no assertion watches yet: the surface you just built, deploy and caching problems, real-device behavior. A green suite is not "shipped", and this discipline without the suite is what let contract regressions slip before the suite existed. Do both.
+Two guards stand behind every deploy, and they are complementary, not interchangeable. The **standing invariant suite** — 963 assertions as of 2026-08-11, `tools/fv_smoke.js` plus every `tools/fv_inv_*.js`, run automatically by preflight, which refuses to clear a broken build — protects the contracts someone has already encoded. The **loop below** catches what no assertion watches yet: the surface you just built, deploy and caching problems, real-device behavior. A green suite is not "shipped", and this discipline without the suite is what let contract regressions slip before the suite existed. Do both.
 
 1. **Read the real current code** for the lines you're changing. Never edit from memory — the file drifts.
 2. Make **one logical change**.
@@ -367,7 +367,7 @@ Two guards stand behind every deploy, and they are complementary, not interchang
    ```bash
    python3 tools/fv_deploy.py preflight -m "what changed"
    ```
-   Auto-loads every `fv_inv_*.js` group, prints `RESULT: PASS (798/798)` (count as of 2026-08-02) and refuses to clear the build on any failure. (Suite only, no preflight wrapper: `node tools/fv_smoke.js index.html tools/fv_inv_*.js`.)
+   Auto-loads every `fv_inv_*.js` group, prints `RESULT: PASS (963/963)` (count as of 2026-08-11) and refuses to clear the build on any failure. (Suite only, no preflight wrapper: `node tools/fv_smoke.js index.html tools/fv_inv_*.js`.)
 6. **Manual regression sweep — narrowed 2026-08-01 to what the suite does not render.** The suite already exercises `renderFleet`, `renderAlerts`, `unitCard`, `paneVitals`, `paneIssues`, `paneService` and `paneMoves` against populated and edge-field fixtures (`fv_inv_fleetcard.js`, `fv_inv_alerts.js`, `fv_inv_bigiron.js`, `fv_inv_status.js`, `fv_inv_placementphotos.js`). Still swept **by hand, in the harness or browser**, because no assertion renders them:
    - `renderJobsList`, `renderJobDetail`, `renderMapScreen`, `paneInfo` — all three states (**empty**, **populated**, **edge**);
    - the **empty** states of `renderFleet` (zero units), `renderAlerts` (nothing alerting), `paneIssues` (no issues) and `paneMoves` (no history);
