@@ -31,8 +31,9 @@ Primary users: field technicians, a crew chief, and the owner. Multi-user, one s
 | Leaflet.markercluster | 1.5.3 | pin clustering / spiderfy |
 | html5-qrcode | 2.3.8 | barcode + QR scanning |
 | qrcodejs | 1.0.0 | generating a QR for the app link |
-| Chart.js | 4.4.1 | **loaded but currently unused** — see §7 |
 | @supabase/supabase-js | v2 | backend client |
+
+(Chart.js 4.4.1 was loaded-but-unused; removed 2026-08-11, build `chartjs-rm` — see §7.)
 
 **State model.** A single in-memory object `S`:
 
@@ -294,7 +295,7 @@ The owner repeatedly declined features to keep the app usable. Every item below 
 
 ## 7. Known issues & technical debt
 
-**Chart.js is loaded but unused.** The vitals view originally used stacked multi-axis charts; they were unreadable (metrics with wildly different ranges cannot share a chart honestly) and were replaced by the Recent-checks table. `drawTrend()` still exists but is never called. Safe to delete along with the CDN tag.
+**Chart.js — removed 2026-08-11 (build `chartjs-rm`).** The vitals view originally used stacked multi-axis charts; they were unreadable (metrics with wildly different ranges cannot share a chart honestly) and were replaced by the Recent-checks table. `drawTrend()`, `trendChartObj`, and the CDN tag are deleted (~70 KB less parse on cold load). The multi-axis rejection stands; if a chart ever returns it is a **single-metric** sparkline, and it re-adds its own library then.
 
 **Photos — resolved 2026-07-30 (build `photos-sw`).** Capture still stores data URIs (works offline); `flush()` uploads them to the `unit-photos` Storage bucket and swaps in public URLs before rows serialize — bounded (6/flush, 8s abort via AbortController) so a stalled LTE upload can't hold the flush lock. Storage outage: URI stays, save proceeds, retried next flush. Accepted debt: removed photos orphan their Storage objects, and a timed-out-but-landed upload orphans + duplicates on retry. **One-time migration of legacy base64 rows (~8 units): `tools/fv_migrate_photos.js` — pending owner run** (`--dry-run` first; ordering matters: only run *after* the `photos-sw` build is live, since the old app could re-flush base64 over migrated rows).
 
