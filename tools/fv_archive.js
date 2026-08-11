@@ -89,6 +89,18 @@ function compactTs(ts) {
   return ts == null ? 'no-ts' : new Date(ts).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
 }
 function isTwin(u) { return !!(u && u.engines && typeof u.engines === 'object' && !u.engines.off); }
+/* Mirror of the app's derivedLoadPct (index.html), on snake_case rows: apparent
+   power over nameplate — sqrt(3)*V_LL*(sum legs)/3 / (kVA*1000). No PF anywhere
+   (it cancels against the rating's 0.8). Metered wins; all three legs required
+   (one leg probably means single-phase). Recomputed on every archive run, so a
+   formula fix here recomputes every past check — nothing is frozen. */
+function derivedLoadPct(r) {
+  if (!r || r.load_kw != null || r.load_pct != null) return null;
+  if (r.voltage_ll == null || r.amps_l1 == null || r.amps_l2 == null || r.amps_l3 == null) return null;
+  const kva = r.rating_kva;
+  if (!(kva > 0)) return null;
+  return Math.round(Math.sqrt(3) * r.voltage_ll * (r.amps_l1 + r.amps_l2 + r.amps_l3) / 3 / (kva * 10));
+}
 function jobMetaOf(u, showId) {
   const jm = u && u.job_meta;
   return (jm && typeof jm === 'object' && jm[showId] && typeof jm[showId] === 'object') ? jm[showId] : {};
@@ -555,10 +567,10 @@ async function archiveShow(show, all, totals, outRoot) {
 
   fs.writeFileSync(path.join(dir, 'data', 'csv', 'checks.csv'), toCsv(
     ['ts_utc', 'serial', 'engine', 'tech_name', 'attribution', 'voltage_ll', 'voltage_ln', 'amps_l1', 'amps_l2', 'amps_l3', 'hz',
-      'load_kw', 'load_pct', 'rating_kva', 'coolant_temp', 'oil_pressure', 'fuel_psi', 'fuel_level_pct', 'battery_v', 'def_pct',
+      'load_kw', 'load_pct', 'load_pct_derived', 'rating_kva', 'coolant_temp', 'oil_pressure', 'fuel_psi', 'fuel_level_pct', 'battery_v', 'def_pct',
       'engine_hours', 'condition_ok', 'broken_gauges', 'notes', 'unit_id', 'report_id'],
     checks.map((r) => [iso(r.ts), serialOf(r.unit_id), r.engine || '', r.tech_name || '', attribution(r),
-      r.voltage_ll, r.voltage_ln, r.amps_l1, r.amps_l2, r.amps_l3, r.hz, r.load_kw, r.load_pct, r.rating_kva,
+      r.voltage_ll, r.voltage_ln, r.amps_l1, r.amps_l2, r.amps_l3, r.hz, r.load_kw, r.load_pct, derivedLoadPct(r) ?? '', r.rating_kva,
       r.coolant_temp, r.oil_pressure, r.fuel_psi, r.fuel_level_pct, r.battery_v, r.def_pct, r.engine_hours,
       r.condition_ok === true ? 'yes' : '', Array.isArray(r.broken_gauges) ? r.broken_gauges.join('; ') : '',
       r.notes || '', r.unit_id, r.id]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))));
@@ -709,6 +721,13 @@ pins are the last logged movement, not surveyed positions.
 - **Load %** was derived at check time: \`round(load_kw / (rating_kva × 0.8) × 100)\`
   (0.8 assumed power factor). Each check stamps the \`rating_kva\` it used, so the
   stored percentage is self-describing even if ratings change later.
+- **\`load_pct_derived\` (checks.csv) is computed, not observed.** Filled only when
+  the check has no metered \`load_kw\`/\`load_pct\` but carries V L-L, all three amp
+  legs, and a stamped rating: \`sqrt(3) x V_LL x (sum of legs)/3 / (kVA x 1000)\` —
+  apparent power over nameplate, **no power-factor assumption** (a metered check's
+  \`load_pct\` equals this x PF/0.8, so derived reads up to ~20% low when true PF
+  is high; direction known). Recomputed on every archive run — a formula change
+  re-derives every past check. Never merge it silently with \`load_pct\`.
 - **Paralleled big iron: load % reflects bank state at observation time, not unit
   sizing.** Large stages run banks of paralleled machines (e.g. four 500s on one
   stage) brought online in steps — one machine through early build, two during

@@ -294,4 +294,35 @@ module.exports = async (app, t) => {
   app.fn.hasDefT();
   app.fn.saveUnit('u-sd');
   t.ok(uSd.hasDef == null, 'flipped off saves null — off is absence, not false (got ' + uSd.hasDef + ')');
+
+  t.group('derived load: apparent-power %, at read time, never a kW');
+  // Small iron has no kW meter — 52 archive checks carried amps+volts and no
+  // load_kw. Derived load % = sqrt(3)*V_LL*(sum legs)/3 / (kVA*1000): apparent
+  // power over nameplate, NO power-factor assumption (it cancels against the
+  // rating's 0.8). Guards: metered always wins; all three legs required (one
+  // leg probably means single-phase, where sqrt(3) is wrong); nothing stored —
+  // every input is already stamped on the row.
+  const dl = app.fn.derivedLoadPct;
+  t.eq(dl({ voltageLL: 480, ampsL1: 60, ampsL2: 60, ampsL3: 60, ratingKva: 100 }), 50,
+    'sqrt(3)*480*60 = 49.9 kVA on a 100 -> 50%');
+  t.eq(dl({ voltageLL: 208, ampsL1: 272, ampsL2: 45, ampsL3: 200, ratingKva: 125 }), 50,
+    'imbalanced legs SUM — 272/45/200 all count');
+  t.eq(dl({ voltageLL: 480, ampsL1: 60, ampsL2: 60, ampsL3: 60, ratingKva: 100, loadKw: 30 }), null,
+    'metered kW present -> never overridden');
+  t.eq(dl({ voltageLL: 480, ampsL1: 60, ampsL2: 60, ampsL3: 60, ratingKva: 100, loadPct: 40 }), null,
+    'stored load % present -> never overridden');
+  t.eq(dl({ voltageLL: 480, ampsL1: 60, ampsL3: 60, ratingKva: 100 }), null,
+    'a missing leg -> no derivation (single-phase guard)');
+  t.eq(dl({ ampsL1: 60, ampsL2: 60, ampsL3: 60, ratingKva: 100 }), null, 'no voltage -> null');
+  t.eq(dl({ voltageLL: 480, ampsL1: 60, ampsL2: 60, ampsL3: 60 }), null, 'no stamped rating -> null');
+
+  const tNow = Date.now();
+  const tbl3 = app.fn.recentChecksTable([
+    { id: 'd1', timestamp: tNow, techName: 'Mike R.', voltageLL: 480, ampsL1: 60, ampsL2: 60, ampsL3: 60, ratingKva: 100 },
+    { id: 'd2', timestamp: tNow - 3600e3, techName: 'Dana', voltageLL: 480, ampsL1: 50, ampsL2: 50, ampsL3: 50, ratingKva: 100, loadKw: 32, loadPct: 40 },
+  ]);
+  t.includes(tbl3, 'Load %', 'derived value fills the Load % row');
+  t.includes(tbl3, '~50', 'derived reading is marked with ~');
+  t.includes(tbl3, 'est', 'and labeled est');
+  t.excludes(tbl3, '~40', 'metered reading carries no derived marker');
 };
