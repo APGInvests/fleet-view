@@ -576,9 +576,9 @@ async function archiveShow(show, all, totals, outRoot) {
       r.notes || '', r.voided_at || '', r.voided_by || '', r.unit_id, r.id]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))));
 
   fs.writeFileSync(path.join(dir, 'data', 'csv', 'issues.csv'), toCsv(
-    ['ts_utc', 'serial', 'engine', 'severity', 'title', 'text', 'tech_name', 'resolved', 'attribution', 'photo_count', 'unit_id', 'issue_id'],
+    ['ts_utc', 'serial', 'engine', 'severity', 'title', 'text', 'tech_name', 'resolved', 'attribution', 'photo_count', 'from_report_id', 'unit_id', 'issue_id'],
     issues.map((i) => [iso(i.ts), serialOf(i.unit_id), i.engine || '', i.severity || '', i.title || '', i.text || '',
-      i.tech_name || '', i.resolved ? 'yes' : 'no', attribution(i), (i.photos || []).length, i.unit_id, i.id])
+      i.tech_name || '', i.resolved ? 'yes' : 'no', attribution(i), (i.photos || []).length, i.from_report_id || '', i.unit_id, i.id])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0])))));
 
   fs.writeFileSync(path.join(dir, 'data', 'csv', 'movements.csv'), toCsv(
@@ -775,6 +775,7 @@ pins are the last logged movement, not surveyed positions.
 | reports.broken_gauges | Field keys the tech flagged as broken instruments (\`voltage\`/\`amps\` cover their leg groups). A blank vital + its key here = gauge broken, not "not observed". Cleared by a later check recording a real value on that gauge |
 | reports.engine_hours | Meter reading at check time — the source for runtime deltas |
 | issues.severity | 'cosmetic' / 'maintenance' / 'down' |
+| issues.from_report_id | Set = this issue was PROMOTED from that check's note (one tech tap on the check form). Blank = filed directly. Measures whether the issue flow is winning back the notes box |
 | movements.from/to_type | 'show' / 'shop' / 'transit' / 'fleet' (= unassigned) |
 | status_events.status | Operational status change event ('running'/'staged'/'down'), per engine when tagged |
 `;

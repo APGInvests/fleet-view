@@ -382,4 +382,76 @@ module.exports = async (app, t) => {
   app.document.querySelector('#v_ll').value = '480';
   app.fn.saveVitals('u-mt');
   t.eq(app.S.reports.length, n0 + 2, 'any real reading saves on the first tap — happy path untouched');
+
+  t.group('note-to-issue promotion: one tap, tech-initiated, never automatic');
+  // The archives: 10 defect notes vs 6 issue rows all summer. The chip exists
+  // only once a note exists (a normal check never renders the decision), the
+  // note stays on the check untouched, and from_report_id records lineage.
+  // Severity defaults to maintenance; hard-down is deliberately NOT offered —
+  // status has one writer, the Status segment on this same form.
+  const rowI = app.fn.toRow('issues', { id: 'x', fromReportId: 'rpt-1' });
+  t.eq(rowI.from_report_id, 'rpt-1', 'persists as from_report_id');
+  t.eq(app.fn.fromRow('issues', rowI).fromReportId, 'rpt-1', 'round-trips back');
+  app.setState({ units: [mkUnit({ id: 'u-ni', klass: 'small', opStatus: 'running' })],
+                 shows: [{ id: 'show-A', name: 'A' }], issues: [] });
+  app.S.settings.techName = 'Mike R.';
+  app.fn.logVitals('u-ni');
+  const fNi = app.document.querySelector('#sheet').innerHTML;
+  t.includes(fNi, 'id="v_niwrap"', 'promotion affordance exists on the form');
+  t.includes(fNi, 'flag as issue', 'and says what it does');
+  t.eq(app.document.querySelector('#v_niwrap').style.display, 'none', 'invisible while the note is empty — happy path never sees it');
+  app.document.querySelector('#v_notes').value = 'Loose alternator belt';
+  app.fn.noteIssueVis();
+  t.ne(app.document.querySelector('#v_niwrap').style.display, 'none', 'typing a note reveals the chip');
+  app.fn.saveVitals('u-ni');
+  t.eq(app.S.issues.length, 0, 'note typed but chip untapped -> NO issue, ever');
+  let rNi = app.S.reports.filter((x) => x.unitId === 'u-ni').slice(-1)[0];
+  t.eq(rNi.notes, 'Loose alternator belt', 'the note saves on the check as typed');
+  app.fn.logVitals('u-ni');
+  app.document.querySelector('#v_notes').value = 'Exhaust after treatment alarm';
+  app.fn.noteIssueVis();
+  app.fn.noteIssueT();
+  app.fn.saveVitals('u-ni');
+  t.eq(app.S.issues.length, 1, 'chip tapped -> one issue from the note');
+  rNi = app.S.reports.filter((x) => x.unitId === 'u-ni').slice(-1)[0];
+  const iNi = app.S.issues[0];
+  t.eq(iNi.text, 'Exhaust after treatment alarm', 'note text becomes the issue text');
+  t.eq(iNi.title, 'Exhaust after treatment alarm', 'short first line is the title');
+  t.eq(iNi.severity, 'maintenance', 'defaults to Needs service');
+  t.eq(iNi.resolved, false, 'opens unresolved');
+  t.eq(iNi.techName, 'Mike R.', 'tech carries over');
+  t.eq(iNi.fromReportId, rNi.id, 'lineage recorded');
+  t.eq(rNi.notes, 'Exhaust after treatment alarm', 'the check keeps its note — records are never edited');
+  const uNi = app.S.units.find((x) => x.id === 'u-ni');
+  t.includes(app.fn.paneIssues(uNi), 'from a check', 'issue card shows its provenance');
+  t.includes(app.fn.paneVitals(uNi), 'filed as issue', 'check log marks the promoted note');
+  app.fn.logVitals('u-ni');
+  app.document.querySelector('#v_notes').value = 'paint chipped on door';
+  app.fn.noteIssueVis();
+  app.fn.noteIssueT();
+  app.fn.niSevSet('cosmetic');
+  app.fn.saveVitals('u-ni');
+  t.eq(app.S.issues.slice(-1)[0].severity, 'cosmetic', 'the optional severity tap sticks');
+  t.excludes(app.document.querySelector('#sheet').innerHTML, 'Hard down', 'no down option in promotion — status has one writer');
+  app.fn.logVitals('u-ni');
+  app.document.querySelector('#v_notes').value = 'stray thought';
+  app.fn.noteIssueVis();
+  app.fn.noteIssueT();
+  app.document.querySelector('#v_notes').value = '';
+  app.fn.saveVitals('u-ni');
+  app.fn.saveVitals('u-ni'); // blank check -> second tap saves the visit
+  t.eq(app.S.issues.length, 2, 'note deleted after tapping -> no issue from an empty note');
+  app.fn.logVitals('u-ni');
+  app.document.querySelector('#v_notes').value = 'another note';
+  app.fn.saveVitals('u-ni');
+  t.eq(app.S.issues.length, 2, 'reopening the form resets the chip — no leak between checks');
+  const longLine = 'Fuel pressure low, not filling the secondary filter, racors changed, still reads fifteen psi at operating rpm';
+  app.fn.logVitals('u-ni');
+  app.document.querySelector('#v_notes').value = longLine;
+  app.fn.noteIssueVis();
+  app.fn.noteIssueT();
+  app.fn.saveVitals('u-ni');
+  const iLong = app.S.issues.slice(-1)[0];
+  t.ok(iLong.title.length <= 60, 'long note -> truncated title (got ' + iLong.title.length + ')');
+  t.eq(iLong.text, longLine, 'full note preserved as the issue text');
 };
