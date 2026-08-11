@@ -377,6 +377,8 @@ module.exports = async (app, t) => {
     { id: 'ra', unitId: 'tw', engine: null, engineHours: 3300, timestamp: 2000, techName: 'Old Hand', voltageLL: 480 },
     { id: 'rb', unitId: 'tw', engine: 'B', engineHours: 118, timestamp: 3000, techName: 'Dana P.', voltageLL: 478 }] });
   F.openUnit('tw');
+  F.toggleHist('tw'); /* 2026-08-11: history rows live under the collapse; it stays open across engine flips by design */
+  F.histShowAll('tw'); /* fixtures sit at epoch timestamps — outside any 30-day window */
   F.setVitalsEng('tw', 'B');
   sh = app.document.getElementById('sheet').innerHTML;
   t.includes(sh, 'Dana P.', "the B filter shows B's checks");

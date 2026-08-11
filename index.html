@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-08-10 note-promote -->
+<!-- fleetview build 2026-08-11 check-history -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1136,9 +1136,14 @@ function quickAddShop(unitId){sheet('New shop',`<label class="fld"><span class="
 function doQuickAddShop(unitId){const nm=($('#qs_name').value||'').trim();if(!nm){toast('Enter a shop name');return;}const id=uid('shop');S.shops.push({id,name:nm});save();if(unitId)pickDest(unitId,'shop',id);else{closeSheet();render();}}
 function moveMenu(unitId,fromScan){moveFromScan=!!fromScan;const rec=recentDests();const recBtns=rec.length?('<div class="lb" style="margin-bottom:6px">RECENT</div>'+rec.map(d=>`<button class="btn primary block" style="margin-bottom:8px" onclick="pickDest('${unitId}','${d.type}','${d.id}')">${esc(d.name)}${d.type==='shop'?' · shop':''}</button>`).join('')+'<hr class="sep"/>'):'';const shows=S.shows.map(s=>`<button class="btn ghost block" style="margin-bottom:8px" onclick="pickDest('${unitId}','show','${s.id}')">${esc(s.name)}</button>`).join('');const shops=S.shops.map(s=>`<button class="btn ghost block" style="margin-bottom:8px" onclick="pickDest('${unitId}','shop','${s.id}')">${esc(s.name)}</button>`).join('');const openBtn=fromScan?`<hr class="sep"/><button class="btn ghost block" onclick="closeSheet();openUnit('${unitId}')">Just open it (don't move)</button>`:'';sheet(fromScan?"Where's it going?":'Move / scan into…',`${recBtns}<div class="lb" style="margin-bottom:6px">JOBS</div>${shows}<button class="btn dark block" style="margin-bottom:8px" onclick="quickAddJob('${unitId}')">+ New job</button><hr class="sep"/><div class="lb" style="margin-bottom:6px">SHOPS</div>${shops}<button class="btn dark block" style="margin-top:2px" onclick="quickAddShop('${unitId}')">+ New shop</button><hr class="sep"/><button class="btn ghost block" onclick="pickDest('${unitId}','fleet','')">↩ Back to fleet (unassign)</button>${openBtn}`);}
 /* ===== UNIT DETAIL ===== */
-let detailTab='vitals',vitalsEng=null;
-function openUnit(id){detailTab='vitals';vitalsEng=null;renderUnit(id);}
+let detailTab='vitals',vitalsEng=null,histOpen=false,histAll=false;
+function openUnit(id){detailTab='vitals';vitalsEng=null;histOpen=false;histAll=false;renderUnit(id);}
 function setVitalsEng(id,e){vitalsEng=e||null;renderUnit(id);}
+/* History stays open across engine-chip flips (comparing A vs B is the use
+   case) but re-collapses on every unit open — the Vitals tab must stay light
+   by default. */
+function toggleHist(id){histOpen=!histOpen;if(!histOpen)histAll=false;renderUnit(id);}
+function histShowAll(id){histAll=true;renderUnit(id);}
 /* Identity header — pinned to the top of every check form, all units. Answers
    "what am I standing in front of, and what did it read last time?" without a
    tap. On a TwinPak it also answers WHICH ENGINE, which the form used to drop
@@ -1207,12 +1212,73 @@ function derivedLoadPct(r){
   const kva=r.ratingKva;if(!(kva>0))return null;
   const va=Math.sqrt(3)*r.voltageLL*(r.ampsL1+r.ampsL2+r.ampsL3)/3;
   return Math.round(va/(kva*10));}
+/* ===== UNIT HISTORY (2026-08-11) — general backward-looking access =====
+   The app showed only the latest check and a flat 25-row log; answering "what
+   has this unit been doing" required analysis outside the app. summarizeChecks
+   is PURE (window in, numbers out) and must only ever be fed through the
+   reportsFor() choke point — a voided check must never reach the runtime walk.
+   Runtime uses a LAST-ACCEPTED WALK because the archives proved meters get
+   fat-fingered and swapped: accept a pair only if 0 <= delta <= elapsed*1.1+2h
+   (a meter can't outrun the clock; slack for drift and same-visit re-reads),
+   and on reject DON'T advance the anchor — 100, 9999, 110 yields 10 h, not 0
+   and never a negative. Accepted edge: a mid-window meter replacement
+   undercounts runtime — fails safe, never fabricates hours. Duty divides by
+   the span of ACCEPTED readings, not the 30-day window, and stays null under
+   24 h of span. */
+function summarizeChecks(win){
+  const hs=win.filter(r=>r.engineHours!=null).slice().reverse();
+  let runHrs=null,dutyPct=null;
+  if(hs.length>=2){let last=hs[0],run=0,acc=1;
+    for(let i=1;i<hs.length;i++){const r=hs[i];const d=r.engineHours-last.engineHours;const dtH=(r.timestamp-last.timestamp)/3600e3;
+      if(d>=0&&d<=dtH*1.1+2){run+=d;last=r;acc++;}}
+    if(acc>=2){runHrs=Math.round(run);const spanH=(last.timestamp-hs[0].timestamp)/3600e3;
+      dutyPct=spanH>=24?Math.min(100,Math.round(run/spanH*100)):null;}}
+  const vals=win.map(r=>r.loadPct!=null?{v:r.loadPct,est:false}:(derivedLoadPct(r)!=null?{v:derivedLoadPct(r),est:true}:null)).filter(Boolean);
+  let medLoad=null,peakLoad=null,medLoadEst=false;
+  if(vals.length){const vs=vals.map(x=>x.v).sort((a,b)=>a-b);const m=vs.length>>1;
+    medLoad=Math.round(vs.length%2?vs[m]:(vs[m-1]+vs[m])/2);peakLoad=vs[vs.length-1];medLoadEst=vals.some(x=>x.est);}
+  const cools=win.map(r=>r.coolantTemp).filter(v=>v!=null);
+  return {n:win.length,runHrs,dutyPct,medLoad,medLoadEst,peakLoad,loadN:vals.length,maxCool:cools.length?Math.max(...cools):null};}
+/* The summary card is deliberately OUTSIDE the History collapse — it IS the
+   answer to "what has it been doing lately"; only the long list hides. Always
+   the fixed 30-day window regardless of Show-all, titled by its window so it
+   can't lie. Two checks minimum: one check earns no summary, the Latest card
+   already says everything. */
+function checkSummary(u,rs){const cut=now()-30*864e5;const win=rs.filter(r=>r.timestamp>=cut);
+  if(win.length<2)return '';
+  const s=summarizeChecks(win);
+  const iss=issuesFor(u.id);const opened=iss.filter(i=>i.timestamp>=cut).length;const open=iss.filter(i=>!i.resolved).length;
+  const loadTxt=s.loadN?((s.medLoadEst?'~':'')+s.medLoad+'%'+(s.medLoadEst?' est':'')+((s.peakLoad!=null&&s.peakLoad!==s.medLoad)?(' · peak '+s.peakLoad+'%'):'')):null;
+  return `<div class="card" style="padding:13px;margin-bottom:12px"><div class="between"><b>Last 30 days</b><span class="muted" style="font-size:12px">${win.length} checks</span></div><div class="kv" style="margin-top:9px">${vk('Run time',s.runHrs!=null?(s.runHrs+' h'):null,'')}${vk('Duty',s.dutyPct!=null?(s.dutyPct+'% of clock'):null,'')}${vk('Load (median)',loadTxt,'')}${vk('Coolant (max)',s.maxCool!=null?(s.maxCool+'°'):null,'')}${(opened||open)?vk('Issues',opened+' opened · '+open+' open',''):''}</div></div>`;}
+function checkLogRow(u,r){const tw=isTwin(u);
+  const a=[r.ampsL1,r.ampsL2,r.ampsL3].filter(v=>v!=null);const av=a.length?Math.round(a.reduce((s,v)=>s+v,0)/a.length):null;
+  const etag=tw?`<span class="chip" style="font-size:10px;margin-left:6px">${r.engine?esc(engName(u,r.engine)):'pre-split'}</span>`:'';
+  return `<div class="card" style="padding:10px 13px;margin-bottom:7px"><div class="between"><b style="font-size:13px">${esc(r.techName||'—')}${etag}</b><span class="muted" style="font-size:11px">${fmtDate(r.timestamp)}</span></div><div class="muted" style="font-size:12px;margin-top:3px">${[r.voltageLL?('LL '+r.voltageLL+'V'):'',r.hz?(r.hz+'Hz'):'',(av!=null?(av+'A'):''),r.coolantTemp!=null?('cool '+r.coolantTemp+'°'):'',r.oilPressure!=null?('oil '+r.oilPressure+'psi'):'',r.fuelLevelPct!=null?('fuel '+r.fuelLevelPct+'%'):'',r.loadKw?(r.loadKw+'kW'):'',r.loadPct!=null?('load '+r.loadPct+'%'):(derivedLoadPct(r)!=null?('load ~'+derivedLoadPct(r)+'% est'):'')].filter(Boolean).join(' · ')||'no readings'}</div>${r.notes?`<div style="font-size:12px;margin-top:4px">📝 ${esc(r.notes)}${S.issues.some(x=>x.fromReportId===r.id)?' <span class="chip warn" style="font-size:10px">⚑ filed as issue</span>':''}</div>`:''}</div>`;}
+/* Collapsed by default; day headers reuse the global .evday class. A day
+   header names the show only when it CHANGES from the previous day — reading
+   down the list reads like the unit's season. 200-row cap on Show-all follows
+   the openGlobalLog precedent. */
+function checkHistory(u,rs){if(!rs.length)return '';
+  const cut=now()-30*864e5;const win=rs.filter(r=>r.timestamp>=cut);const total=rs.length;
+  const head=(ar)=>`<h2 class="section sm" style="cursor:pointer" onclick="toggleHist('${u.id}')">${ar} History <span class="muted" style="font-weight:400;text-transform:none">— ${win.length} in 30 days · ${total} total</span></h2>`;
+  if(!histOpen)return head('▸');
+  const list=histAll?rs.slice(0,200):win;
+  const dk=t=>new Date(t).toLocaleDateString('en-CA');
+  let lastDay=null,lastShow='__none',out='';
+  for(const r of list){const k=dk(r.timestamp);
+    if(k!==lastDay){const sid=r.showId||null;
+      const nm=(sid&&sid!==lastShow)?(' · '+esc(locName('show',sid))):'';
+      lastDay=k;lastShow=sid;
+      out+=`<div class="evday">${esc(new Date(k+'T12:00:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}))}${nm}</div>`;}
+    out+=checkLogRow(u,r);}
+  const tail=(!histAll&&total>win.length)?`<button class="btn ghost block sm" onclick="histShowAll('${u.id}')">Show all ${total} checks</button>`:((histAll&&total>200)?'<p class="muted" style="font-size:11px">Showing the latest 200.</p>':'');
+  return head('▾')+out+tail;}
 function recentChecksTable(rs){if(!rs||rs.length<2)return '';const cols=rs.slice(0,4);const METR=[['V L-L',r=>r.voltageLL],['Amps L1',r=>r.ampsL1],['Amps L2',r=>r.ampsL2],['Amps L3',r=>r.ampsL3],['Coolant °',r=>r.coolantTemp],['Oil psi',r=>r.oilPressure],['Fuel psi',r=>r.fuelPsi],['Load %',r=>r.loadPct!=null?r.loadPct:derivedLoadPct(r),r=>r.loadPct==null&&derivedLoadPct(r)!=null]];const rows=METR.filter(m=>cols.some(r=>m[1](r)!=null));if(!rows.length)return '';const head='<th class="rcm"></th>'+cols.map((r,i)=>`<th>${i===0?'<span class="rcnow">latest</span><br>':''}${esc(fmtAgo(r.timestamp))}<br><span class="rcw">${esc((String(r.techName||'').split(' ')[0])||'—')}</span></th>`).join('');const body=rows.map(m=>{return '<tr><td class="rcm">'+m[0]+'</td>'+cols.map((r,i)=>{const v=m[1](r);if(v==null)return '<td'+(i===0?' class="rclatest"':'')+'><span class="rcna">—</span></td>';const der=m[2]&&m[2](r);let arrow='';if(i===0){const pv=m[1](cols[1]);if(pv!=null&&pv!==v)arrow=' <span class="rcar">'+(v>pv?'▲':'▼')+'</span>';}return '<td'+(i===0?' class="rclatest"':'')+'>'+(der?('~'+v+arrow+' <span class="rcna">est</span>'):(v+arrow))+'</td>';}).join('')+'</tr>';}).join('');return `<div class="card" style="padding:12px 12px 10px;margin-bottom:12px"><div class="between" style="margin-bottom:8px"><span class="lb" style="margin:0">Recent checks</span><span class="muted" style="font-size:10px">newest → older · ▲▼ vs last</span></div><div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="rc"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div></div>`;}
 function paneVitals(u){const tw=isTwin(u);const rs=(tw&&vitalsEng)?engReports(u,vitalsEng):reportsFor(u.id);const lr=rs[0];const g=lr&&lr.gps;const av=r=>{const a=[r.ampsL1,r.ampsL2,r.ampsL3].filter(x=>x!=null);return a.length?Math.round(a.reduce((s,x)=>s+x,0)/a.length):null;};
   const etag=r=>tw?`<span class="chip" style="font-size:10px;margin-left:6px">${r.engine?esc(engName(u,r.engine)):'pre-split'}</span>`:'';
   const chips=tw?`<div class="segwrap" style="margin-bottom:10px">${[[null,'Both'],['A',engName(u,'A')],['B',engName(u,'B')]].map(([k,l])=>`<button type="button" class="${vitalsEng===k?'on':''}" style="${vitalsEng===k?'background:var(--accent);color:#fff':''}" onclick="setVitalsEng('${u.id}','${k||''}')">${esc(l)}</button>`).join('')}</div>${vitalsEng==='A'?'<p class="muted" style="font-size:11px;margin:-4px 0 10px">Includes checks logged before the split, marked pre-split.</p>':''}${vitalsEng==='B'?'<p class="muted" style="font-size:11px;margin:-4px 0 10px">Only checks logged on this engine. Pre-split history is under '+esc(engName(u,'A'))+'.</p>':''}`:'';
   const vr=voidableReport(u,tw?vitalsEng:null);
-  return `${chips}${vr?`<button class="btn ghost block sm" style="margin-bottom:10px" onclick="voidCheck('${vr.id}','${u.id}')">Void my check from ${esc(fmtAgo(vr.timestamp))} — filed by mistake</button>`:''}${lr?`<div class="card" style="padding:13px;margin-bottom:12px"><div class="between"><b>Latest check${etag(lr)}</b><span class="muted" style="font-size:12px">${fmtDate(lr.timestamp)} · ${esc(lr.techName||'')}</span></div><div class="kv" style="margin-top:9px">${vk('Volt L-L',lr.voltageLL,'V')}${vk('Volt L-N',lr.voltageLN,'V')}${vk('Amps L1',lr.ampsL1,'A')}${vk('Amps L2',lr.ampsL2,'A')}${vk('Amps L3',lr.ampsL3,'A')}${vk('Hz',lr.hz,'')}${vk('Load',lr.loadKw,'kW')}${vk('Load',lr.loadPct,'%')}${derivedLoadPct(lr)!=null?vk('Load est','~'+derivedLoadPct(lr),'%'):''}${vk('Coolant temp',lr.coolantTemp,'°')}${vk('Oil P',lr.oilPressure,'psi')}${vk('Fuel P',lr.fuelPsi,'psi')}${vk('Fuel',lr.fuelLevelPct,'%')}${vk('Batt',lr.batteryV,'V')}${vk('DEF',lr.defPct,'%')}${vk('Hrs',lr.engineHours,'')}</div>${lr.notes?`<div style="margin-top:8px;font-size:13px">📝 ${esc(lr.notes)}</div>`:''}${g?`<div style="margin-top:8px;font-size:13px">${gpsLink(g)}</div>`:''}</div>`:`<div class="empty" style="padding:22px"><p class="muted">No checks yet${(tw&&vitalsEng)?(' on '+esc(engName(u,vitalsEng))):''}. Tap Check${(tw&&vitalsEng)?(' '+esc(engName(u,vitalsEng))):''}.</p></div>`}${recentChecksTable(rs)}${rs.length?`<h2 class="section sm">Check log</h2>${rs.slice(0,25).map(r=>`<div class="card" style="padding:10px 13px;margin-bottom:7px"><div class="between"><b style="font-size:13px">${esc(r.techName||'—')}${etag(r)}</b><span class="muted" style="font-size:11px">${fmtDate(r.timestamp)}</span></div><div class="muted" style="font-size:12px;margin-top:3px">${[r.voltageLL?('LL '+r.voltageLL+'V'):'',r.hz?(r.hz+'Hz'):'',(av(r)!=null?(av(r)+'A'):''),r.coolantTemp!=null?('cool '+r.coolantTemp+'°'):'',r.oilPressure!=null?('oil '+r.oilPressure+'psi'):'',r.fuelLevelPct!=null?('fuel '+r.fuelLevelPct+'%'):'',r.loadKw?(r.loadKw+'kW'):'',r.loadPct!=null?('load '+r.loadPct+'%'):(derivedLoadPct(r)!=null?('load ~'+derivedLoadPct(r)+'% est'):'')].filter(Boolean).join(' · ')||'no readings'}</div>${r.notes?`<div style="font-size:12px;margin-top:4px">📝 ${esc(r.notes)}${S.issues.some(x=>x.fromReportId===r.id)?' <span class="chip warn" style="font-size:10px">⚑ filed as issue</span>':''}</div>`:''}</div>`).join('')}`:''}`;}
+  return `${chips}${vr?`<button class="btn ghost block sm" style="margin-bottom:10px" onclick="voidCheck('${vr.id}','${u.id}')">Void my check from ${esc(fmtAgo(vr.timestamp))} — filed by mistake</button>`:''}${lr?`<div class="card" style="padding:13px;margin-bottom:12px"><div class="between"><b>Latest check${etag(lr)}</b><span class="muted" style="font-size:12px">${fmtDate(lr.timestamp)} · ${esc(lr.techName||'')}</span></div><div class="kv" style="margin-top:9px">${vk('Volt L-L',lr.voltageLL,'V')}${vk('Volt L-N',lr.voltageLN,'V')}${vk('Amps L1',lr.ampsL1,'A')}${vk('Amps L2',lr.ampsL2,'A')}${vk('Amps L3',lr.ampsL3,'A')}${vk('Hz',lr.hz,'')}${vk('Load',lr.loadKw,'kW')}${vk('Load',lr.loadPct,'%')}${derivedLoadPct(lr)!=null?vk('Load est','~'+derivedLoadPct(lr),'%'):''}${vk('Coolant temp',lr.coolantTemp,'°')}${vk('Oil P',lr.oilPressure,'psi')}${vk('Fuel P',lr.fuelPsi,'psi')}${vk('Fuel',lr.fuelLevelPct,'%')}${vk('Batt',lr.batteryV,'V')}${vk('DEF',lr.defPct,'%')}${vk('Hrs',lr.engineHours,'')}</div>${lr.notes?`<div style="margin-top:8px;font-size:13px">📝 ${esc(lr.notes)}</div>`:''}${g?`<div style="margin-top:8px;font-size:13px">${gpsLink(g)}</div>`:''}</div>`:`<div class="empty" style="padding:22px"><p class="muted">No checks yet${(tw&&vitalsEng)?(' on '+esc(engName(u,vitalsEng))):''}. Tap Check${(tw&&vitalsEng)?(' '+esc(engName(u,vitalsEng))):''}.</p></div>`}${recentChecksTable(rs)}${checkSummary(u,rs)}${checkHistory(u,rs)}`;}
 let trendChartObj=null;
 function drawTrend(u){const wrap=$('#trendWrap');if(!wrap||typeof Chart==='undefined')return;const rs=reportsFor(u.id).slice().reverse();if(!rs.length){wrap.innerHTML='';return;}try{Chart.defaults.color='#9a8f80';Chart.defaults.borderColor='rgba(138,129,117,.15)';}catch(e){}const amps=r=>{const a=[r.ampsL1,r.ampsL2,r.ampsL3].filter(x=>x!=null);return a.length?Math.round(a.reduce((s,x)=>s+x,0)/a.length):null;};const METRICS=[['Coolant temp','°','#dc5142',r=>r.coolantTemp],['Oil pressure','psi','#6b93d6',r=>r.oilPressure],['Amperage','A','#e2823f',amps],['Fuel','%','#2fa96a',r=>r.fuelLevelPct]];const labels=rs.map(r=>fmtDate(r.timestamp));const dss=[];const scales={x:{ticks:{maxRotation:0,maxTicksLimit:5,font:{size:10}},grid:{display:false}}};METRICS.forEach((m,i)=>{const data=rs.map(m[3]);if(!data.some(v=>v!=null))return;const ax='y'+i;dss.push({label:m[0],data,borderColor:m[2],backgroundColor:m[2],yAxisID:ax,tension:.3,spanGaps:true,pointRadius:2,borderWidth:2,_unit:m[1]});scales[ax]={display:false};});if(!dss.length){wrap.innerHTML='';return;}wrap.innerHTML='<div class="card" style="padding:12px 12px 8px"><div class="lb" style="margin:0 0 6px">Vital trends</div><div style="height:260px"><canvas id="trendChart"></canvas></div><p class="muted" style="font-size:10px;margin:6px 0 0">Each line auto-scales to show its own ups &amp; downs. Tap a name to hide it; tap a point for the exact reading.</p></div>';const c=$('#trendChart');if(!c)return;if(trendChartObj){try{trendChartObj.destroy();}catch(e){}trendChartObj=null;}trendChartObj=new Chart(c,{type:'line',data:{labels,datasets:dss},options:{maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{display:true,position:'top',labels:{boxWidth:12,usePointStyle:true,font:{size:11}}},tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+ctx.parsed.y+(ctx.dataset._unit||'')}}},scales:scales}});}
 function paneIssues(u){const is=issuesFor(u.id);return is.length?is.map(i=>`<div class="card" style="padding:12px;margin-bottom:9px;border-left:5px solid ${i.severity==='down'?'var(--red)':i.severity==='maintenance'?'var(--orange)':'var(--yellow)'}"><div class="between"><b>${esc(i.title||i.severity)}${(isTwin(u)&&i.engine)?`<span class="chip" style="font-size:10px;margin-left:6px">${esc(engName(u,i.engine))}</span>`:''}</b><button class="btn sm ${i.resolved?'ghost':'dark'}" onclick="toggleIssue('${i.id}','${u.id}')">${i.resolved?'Reopen':'Resolve'}</button></div><div style="font-size:13px;margin-top:4px">${esc(i.text||'')}</div>${i.photos&&i.photos.length?photoStrip(i.photos,"bigIssuePhoto('"+i.id+"',",null):''}<div class="muted" style="font-size:11px;margin-top:6px">${i.resolved?'✓ resolved · ':''}${fmtDate(i.timestamp)} · ${esc(i.techName||'')}${i.fromReportId?' · ⚑ from a check':''}</div></div>`).join(''):'<div class="empty" style="padding:22px"><p class="muted">No issues. 🎉</p></div>';}

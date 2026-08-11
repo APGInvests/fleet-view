@@ -424,7 +424,9 @@ module.exports = async (app, t) => {
   t.eq(rNi.notes, 'Exhaust after treatment alarm', 'the check keeps its note — records are never edited');
   const uNi = app.S.units.find((x) => x.id === 'u-ni');
   t.includes(app.fn.paneIssues(uNi), 'from a check', 'issue card shows its provenance');
-  t.includes(app.fn.paneVitals(uNi), 'filed as issue', 'check log marks the promoted note');
+  app.fn.openUnit('u-ni'); app.fn.toggleHist('u-ni'); /* 2026-08-11: rows live under the History collapse */
+  t.includes(app.document.querySelector('#sheet').innerHTML, 'filed as issue', 'check log marks the promoted note');
+  app.fn.openUnit('u-ni'); /* re-collapse so later groups see default state */
   app.fn.logVitals('u-ni');
   app.document.querySelector('#v_notes').value = 'paint chipped on door';
   app.fn.noteIssueVis();
