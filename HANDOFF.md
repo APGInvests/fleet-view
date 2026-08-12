@@ -465,6 +465,7 @@ Ordered roughly by value. All are unbuilt and all were deliberately deferred —
 - Supabase free tier allows ~2 active projects per org.
 - **Camera, geolocation and persistent storage are denied — silently, with no permission prompt — on sandboxed/CSP-iframe origins.** Always test hardware features on the real Pages origin. The tell for this class of bug is *the absence of a prompt*: a denied permission throws, a blocked origin says nothing.
 - Project ref `eujgglfcpdfgskyqfggg`; Supabase project name `fleetview`.
+- **Scheduled full-DB backup (2026-08-11).** The free tier takes no backups and RLS is shared-fleet `using(true)` — any account can delete everything, unrecoverably. `tools/fv_backup.js` (reuses `fv_archive.js`'s read-only auth path via `module.exports`) exports EVERY table unscoped to `~/FleetView-Backups/<stamp>/` — outside the repo by refusal, since backups hold crew data and this repo publishes to Pages. Server-count cross-check per table; a shortfall renames the dir `-INCOMPLETE` (never pruned, exit 2); retention keeps the newest 60 complete runs. Scheduled by `~/Library/LaunchAgents/com.apg.fleetview-backup.plist` (daily 09:07 + at login; creds in chmod-600 `~/.fleetview-backup.env`). Storage objects (unit-photos) are NOT included — rows carry their URLs; separate decision. Restore is deliberately manual (manifest documents the procedure).
 
 ---
 

@@ -879,9 +879,17 @@ function selftest() {
   console.log('selftest OK');
 }
 
+/* ---------------------------------------------------------------- module use */
+
+/* fv_backup.js reuses the auth path and the paginated full-table reader.
+   Requiring this file must never run the CLI — hence the require.main guard
+   below. Nothing else is exported on purpose: everything show-scoped stays
+   internal to the archive. */
+module.exports = { login, fetchAll, TABLES, URLB, ANON, PAGE };
+
 /* ---------------------------------------------------------------- main */
 
-(async () => {
+if (require.main === module) (async () => {
   const argv = process.argv.slice(2);
   const opt = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : null; };
   if (argv.includes('--selftest')) return selftest();
