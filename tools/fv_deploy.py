@@ -201,6 +201,22 @@ def cmd_preflight(args):
         bad("fv_smoke.js missing — the standing invariant suite must be present")
         return 1
 
+    # Publish block: this repo deploys to PUBLIC GitHub Pages. archive/ holds
+    # crew data (client site GPS, placement photos, candid notes) and CLAUDE.md
+    # is personal working context. .gitignore states the intent; this enforces
+    # it — a tracked or staged file under either refuses the ship outright,
+    # because `git add -A` plus one missing ignore line is all it would take.
+    repo = os.path.dirname(HERE)
+    res = subprocess.run(["git", "ls-files", "--cached", "--", "archive", "CLAUDE.md"],
+                         capture_output=True, text=True, cwd=repo)
+    leaked = [l for l in res.stdout.splitlines() if l.strip()]
+    if leaked:
+        bad("PUBLISH BLOCK — crew/personal data is tracked and would deploy to public Pages:")
+        for l in leaked[:10]:
+            print("         " + l)
+        info("Untrack with: git rm -r --cached <path>   (then fix .gitignore) — do NOT push first.")
+        return 1
+
     # Schema gate: every MAPS field must have a real Postgres column. Live probe
     # via the public anon key when the network allows; committed snapshot with a
     # loud banner when it doesn't; refuses to vouch blind. This is the mechanical

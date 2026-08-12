@@ -371,6 +371,8 @@ Two guards stand behind every deploy, and they are complementary, not interchang
    ```
 4. **Behaviour-test the changed path with real assertions** — the expected value, the full expected sort order, the stored value read back. *Not* "it didn't throw." A sort bug that put missing values first passed every crash check and failed one order assertion. (Root cause worth remembering: `Number(null) === 0`, not `NaN`.) If what you tested is a contract that must hold forever, its home is a standing `tools/fv_inv_*.js` file (shape in `tools/README.md`) — preflight then re-proves it on every future deploy.
 5. **Run the full suite:**
+
+   Preflight also enforces the **publish block** (2026-08-11): if anything under `archive/` (crew data — client site GPS, placement photos, candid notes) or `CLAUDE.md` (personal working context) is tracked or staged, preflight refuses to clear the build. `.gitignore` states the intent; this enforces it — one `git add -A` plus a lost ignore line is all a leak to public Pages would take. Test it with a staged canary file; untrack with `git rm -r --cached`.
    ```bash
    python3 tools/fv_deploy.py preflight -m "what changed"
    ```
