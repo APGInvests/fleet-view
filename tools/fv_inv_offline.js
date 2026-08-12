@@ -211,4 +211,22 @@ module.exports = async (app, t) => {
   app.live.NET_DOWN = false; app.live.CACHE_BROKEN = true; app.fn.updateSyncChip();
   t.includes(app.document.querySelector('#syncChip').textContent, 'no offline backup', 'a broken durable cache is LOUD (audit A2)');
   app.live.CACHE_BROKEN = false; app.fn.updateSyncChip();
+
+  t.group('storage persist: requested at boot, denial surfaces in sheet only (never the chip)');
+  t.includes(String(app.fn.boot), 'requestPersist()', 'boot requests persistent storage for the write queue');
+  try { app.fn.requestPersist(); t.ok(true, 'requestPersist tolerates a navigator without storage'); }
+  catch (e) { t.ok(false, 'requestPersist tolerates a navigator without storage', 'threw: ' + e.message); }
+  app.setState({ shows: [], units: [] });
+  app.live.STORAGE_PERSISTED = false;
+  app.fn.openSyncStatus();
+  t.includes(app.document.querySelector('#sheet').innerHTML, 'best-effort',
+    'denied persistence shows the best-effort warning in the sync sheet');
+  app.fn.updateSyncChip();
+  t.ok(app.document.querySelector('#syncChip').style.display === 'none',
+    'denied persistence alone never lights the chip (denial is normal in a browser tab)');
+  app.live.STORAGE_PERSISTED = true;
+  app.fn.openSyncStatus();
+  t.excludes(app.document.querySelector('#sheet').innerHTML, 'best-effort',
+    'granted persistence shows no warning');
+  app.live.STORAGE_PERSISTED = null;
 };

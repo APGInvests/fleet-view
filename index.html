@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-08-11 chartjs-rm -->
+<!-- fleetview build 2026-08-11 storage-persist -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -389,7 +389,7 @@ const KV=(()=>{const mem=new Map();const useMem=(typeof indexedDB==='undefined')
     set:(k,v)=>useMem?(mem.set(k,v),Promise.resolve()):tx('readwrite',st=>st.put(v,k)),
     del:k=>useMem?(mem.delete(k),Promise.resolve()):tx('readwrite',st=>st.del?st.del(k):st.delete(k)),
     _mem:mem};})();
-let cacheTimer=null,NET_DOWN=false,CACHE_BROKEN=false,CACHE_AGE=null;
+let cacheTimer=null,NET_DOWN=false,CACHE_BROKEN=false,CACHE_AGE=null,STORAGE_PERSISTED=null;
 /* The durable cache is the ONLY thing between an offline crew's queued work and
    an app kill — its failures must be LOUD (audit A2). A broken cache write flags
    the chip; a broken read does too. Never a silent catch(()=>{}) here again. */
@@ -399,6 +399,15 @@ async function hydrateFromCache(){try{const c=await KV.get('cache');if(!c||c.v!=
   TABLES.forEach(t=>{if(Array.isArray(c.tables[t]))S[t]=c.tables[t];});
   SNAP=c.snap||{};DEAD=c.dead||{};SYNC_LOST=c.lost||[];if(c.currentShowId)S.currentShowId=c.currentShowId;
   CACHE_AGE=c.savedAt||null;updateSyncChip();return true;}catch(e){CACHE_BROKEN=true;updateSyncChip();return false;}}
+/* Ask the browser to exempt this origin's storage — the IndexedDB write queue —
+   from storage-pressure eviction (the loss §8 rule 13 exists to prevent; tiles
+   were kept OUT of the SW cache for the same reason). Fire-and-forget off the
+   boot path: never blocks render-first. Denial is normal in an uninstalled
+   browser tab, so it surfaces only in the sync-status sheet, never the chip. */
+function requestPersist(){try{
+  if(!(navigator.storage&&navigator.storage.persist))return;
+  navigator.storage.persisted().then(p=>p===true||navigator.storage.persist()).then(g=>{STORAGE_PERSISTED=(g===true);}).catch(()=>{});
+}catch(e){}}
 /* RULE (§8.12): A WRITE THAT FAILS IS NEVER MARKED AS SYNCED — full ack-correct
    flush (plan 3.3). captureDiff() runs SYNCHRONOUSLY at entry and acks are written
    per-row from the CAPTURED serialization, so an edit landing mid-flight can never
@@ -460,7 +469,7 @@ function updateSyncChip(){const el=$('#syncChip');if(!el)return;
 function openSyncStatus(){const failed=!!Object.keys(SYNC_FAILS).length;const pend=SYNC_FAILS['(pending)']||0;const dk=Object.keys(DEAD);
   const stuckRows=dk.map(k=>{const d=DEAD[k];const label=(d.row&&(d.row.serial||d.row.title))||d.rowId||d.table;
     return `<div class="card" style="padding:12px;margin-bottom:8px;border-left:5px solid var(--red)"><div class="between"><b style="font-size:13px">${esc(d.table)} · ${esc(String(label))}</b><span class="muted" style="font-size:11px">${fmtDate(d.ts)}</span></div><div class="muted" style="font-size:11px;margin-top:3px">${esc(d.error)}</div><div class="row" style="margin-top:8px"><button class="btn dark sm wide" onclick="retryDead('${esc(k)}');closeSheet();toast('Retrying…')">Retry</button><button class="btn ghost sm wide" onclick="copyDead('${esc(k)}')">Copy JSON</button></div></div>`;}).join('');
-  sheet('Sync status',`<div class="card" style="padding:13px;margin-bottom:12px"><div class="kv"><div class="k">Unsaved</div><div>${failed?((pend||'connection error')+' — retrying every 30s'):'0'}</div><div class="k">Stuck</div><div>${dk.length}</div><div class="k">Overwritten</div><div>${SYNC_LOST.length}</div></div></div>${dk.length?`<h2 class="section sm">Stuck — the server refused these</h2><p class="muted" style="font-size:12px">Parked so they can't block anything else. Nothing is deleted. If the rejection was temporary (a setting or column that changed), <b>Retry</b> sends it again.</p>${stuckRows}`:''}${SYNC_LOST.length?`<h2 class="section sm">Overwritten while unsaved</h2><p class="muted" style="font-size:12px">Someone else saved a newer version before your change went through. Your entry is kept here — copy it out if it still matters, then re-enter what's current.</p>${SYNC_LOST.map((x,i)=>`<div class="card" style="padding:12px;margin-bottom:8px;border-left:5px solid var(--orange)"><div class="between"><b style="font-size:13px">#${esc(x.serial)}</b><span class="muted" style="font-size:11px">${fmtDate(x.ts)}</span></div><div class="muted" style="font-size:11.5px;margin-top:4px">${esc(String(x.row&&x.row.notes||''))}</div><div class="row" style="margin-top:8px"><button class="btn ghost sm wide" onclick="copyLost(${i})">Copy JSON</button><button class="btn ghost sm wide" onclick="dismissLost(${i})">Dismiss</button></div></div>`).join('')}`:''}<button class="btn primary block" onclick="retrySync();closeSheet()">Sync now</button>`);}
+  sheet('Sync status',`<div class="card" style="padding:13px;margin-bottom:12px"><div class="kv"><div class="k">Unsaved</div><div>${failed?((pend||'connection error')+' — retrying every 30s'):'0'}</div><div class="k">Stuck</div><div>${dk.length}</div><div class="k">Overwritten</div><div>${SYNC_LOST.length}</div>${STORAGE_PERSISTED===false?'<div class="k">Offline copy</div><div>best-effort — the browser may clear it to free space</div>':''}</div></div>${dk.length?`<h2 class="section sm">Stuck — the server refused these</h2><p class="muted" style="font-size:12px">Parked so they can't block anything else. Nothing is deleted. If the rejection was temporary (a setting or column that changed), <b>Retry</b> sends it again.</p>${stuckRows}`:''}${SYNC_LOST.length?`<h2 class="section sm">Overwritten while unsaved</h2><p class="muted" style="font-size:12px">Someone else saved a newer version before your change went through. Your entry is kept here — copy it out if it still matters, then re-enter what's current.</p>${SYNC_LOST.map((x,i)=>`<div class="card" style="padding:12px;margin-bottom:8px;border-left:5px solid var(--orange)"><div class="between"><b style="font-size:13px">#${esc(x.serial)}</b><span class="muted" style="font-size:11px">${fmtDate(x.ts)}</span></div><div class="muted" style="font-size:11.5px;margin-top:4px">${esc(String(x.row&&x.row.notes||''))}</div><div class="row" style="margin-top:8px"><button class="btn ghost sm wide" onclick="copyLost(${i})">Copy JSON</button><button class="btn ghost sm wide" onclick="dismissLost(${i})">Dismiss</button></div></div>`).join('')}`:''}<button class="btn primary block" onclick="retrySync();closeSheet()">Sync now</button>`);}
 function copyLost(i){try{navigator.clipboard.writeText(JSON.stringify(SYNC_LOST[i],null,2));}catch(e){}toast('Copied');}
 function dismissLost(i){SYNC_LOST.splice(i,1);updateSyncChip();openSyncStatus();}
 function retrySync(){toast('Retrying sync…');clearTimeout(flushTimer);flush();}
@@ -510,7 +519,7 @@ async function boot(){authMsg('Loading…');let session=null;
   if(!session){showAuth();return;}
   USER=session.user;const nm=(USER.user_metadata&&USER.user_metadata.name)||'';S.settings.techName=nm||(USER.email?USER.email.split('@')[0]:'Tech');hideAuth();
   const cached=await hydrateFromCache();TAB=(S.settings.homeTab==='fleet')?'fleet':'jobs';setActiveNav(TAB);
-  SYNC_READY=true;render();initNetTriggers();    /* interactive NOW — the network fills in behind */
+  SYNC_READY=true;render();initNetTriggers();requestPersist();    /* interactive NOW — the network fills in behind */
   loadAll().then(()=>{subscribeRealtime();render();
     if(!cached&&NET_DOWN&&!S.units.length&&!S.shows.length)toast('No connection — will sync when you have signal');});
   if(!nm)setTimeout(promptName,500);}
