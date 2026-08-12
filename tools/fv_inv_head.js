@@ -33,4 +33,12 @@ module.exports = (app, t) => {
   t.ok(!floating, 'supabase-js is never a floating @2 again');
   const fonts = tags.filter((tag) => tag.includes('fonts.googleapis.com/css'));
   t.ok(fonts.length <= 1, 'Google Fonts is the only SRI exemption, and there is one of it');
+
+  t.group('document shell: pull-to-refresh stays dead (typed vitals survive the gesture)');
+  const css = ((html.match(/<style>([\s\S]*?)<\/style>/i) || [])[1] || '').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = (sel) => (css.match(new RegExp('(?:^|})\\s*' + sel + '\\{([^}]*)\\}')) || [])[1] || '';
+  t.includes(rule('html'), 'overscroll-behavior-y:none', 'html forbids pull-to-refresh');
+  t.includes(rule('body'), 'overscroll-behavior-y:none', 'body forbids pull-to-refresh');
+  t.includes(css.match(/\.sheet\{([^}]*)\}/)[1], 'overscroll-behavior:contain',
+    'sheets contain scroll-chaining — a sheet at its top edge never hands the gesture to the page');
 };

@@ -261,6 +261,9 @@ The destination chooser leads with the **last 3 destinations** as one-tap button
 
 Scanner reads **1D barcodes and QR** (Code-128/39/93, ITF, Codabar, EAN/UPC, QR, DataMatrix), uses the native detector where available, has a wide scan window sized for linear codes, a torch toggle, and a manual type-in fallback.
 
+### Mobile shell (shipped 2026-08-11, `viewport-polish`)
+Pull-to-refresh is disabled (`overscroll-behavior-y:none` on html+body, `overscroll-behavior:contain` on `.sheet`) — an accidental reload mid-check-form eats every typed vital, and the check form lives in a sheet whose top edge would otherwise chain the gesture to the page. Guarded in `tools/fv_inv_head.js`. Sheet/map heights carry `dvh` overrides after their `vh` fallbacks so the iOS URL-bar collapse doesn't shift them mid-use (no effect in installed-PWA mode, where there is no URL bar). The theme-color meta already tracked the in-app theme toggle via `applyTheme()` — noted here because an audit flagged it as missing; it isn't.
+
 ### Status colours
 green = running · yellow = cosmetic issue · orange = service due/over or low fuel · red = hard down · grey = staged · blue = in transit. Every card also shows **freshness** (time since last check) — stale data is its own status.
 

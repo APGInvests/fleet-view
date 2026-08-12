@@ -10,7 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-08-11 deps-pin-sri -->
+<!-- fleetview build 2026-08-11 viewport-polish -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -58,7 +58,11 @@
   :root[data-theme="light"] .chip.ok{background:#dff0e4;color:#1c7a45;border-color:#b6ddc2}
   *{box-sizing:border-box}
   html,body{margin:0;padding:0}
-  body{font-family:var(--serif);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;padding-bottom:calc(78px + env(safe-area-inset-bottom))}
+  /* Pull-to-refresh mid-check-form is field data loss: a reload eats every typed
+     vital. html+body kill it at the root; .sheet contains scroll-chaining so a
+     sheet scrolled to its top can't hand the gesture to the page (viewport-polish). */
+  html{overscroll-behavior-y:none}
+  body{font-family:var(--serif);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;padding-bottom:calc(78px + env(safe-area-inset-bottom));overscroll-behavior-y:none}
   .barlow{font-family:var(--serif);font-weight:700}
   .wrap{max-width:680px;margin:0 auto;padding:0 16px}
   header.top{position:sticky;top:0;z-index:40;background:var(--topbar-bg);color:var(--ink);padding:calc(env(safe-area-inset-top) + 10px) 0 10px;box-shadow:0 1px 0 var(--line),0 3px 16px rgba(0,0,0,.42)}
@@ -161,7 +165,7 @@
   .fchip.on.down{background:var(--red);border-color:var(--red)}
   .overlay{position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.62);display:none;align-items:flex-end;justify-content:center}
   .overlay.on{display:flex}
-  .sheet{background:var(--bg);width:100%;max-width:680px;max-height:94vh;overflow:auto;border-radius:20px 20px 0 0;padding:0 0 24px;border-top:1px solid var(--line)}
+  .sheet{background:var(--bg);width:100%;max-width:680px;max-height:94vh;max-height:94dvh;overflow:auto;overscroll-behavior:contain;border-radius:20px 20px 0 0;padding:0 0 24px;border-top:1px solid var(--line)}
   .sheet .sh-top{position:sticky;top:0;background:var(--bg);padding:14px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);z-index:2}
   .sheet .sh-top h3{margin:0;font-family:var(--serif);font-size:23px;letter-spacing:.2px;flex:1;font-weight:700}
   .sheet .sh-body{padding:16px}
@@ -184,7 +188,7 @@
   .segwrap button.on{color:#fff}
   #reader{width:100%;border-radius:12px;overflow:hidden;background:#000;min-height:250px}
   .qrbox{display:grid;place-items:center;padding:14px;background:#fff;border-radius:12px}
-  #map{height:62vh;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:var(--surface2);isolation:isolate}
+  #map{height:62vh;height:62dvh;border-radius:14px;overflow:hidden;border:1px solid var(--line);background:var(--surface2);isolation:isolate}
   /* Map elements must read on BOTH street and aerial imagery — one style that works
      everywhere, not two that each work once. Plugin-default cluster bubbles are
      translucent (inherit the imagery); these overrides make them opaque charcoal
@@ -1005,10 +1009,10 @@ function drawMap(scopeShowId){const el=$('#map');if(!el)return;const note=$('#ma
     if(note)note.textContent=(units.length?(units.length+' unit(s)'+(useCl?'. Piles group together. Tap a cluster to spread them out. ':'. ')):(site?'Centered on the venue. ':''))+'Tiles blank? Open the link directly on your phone.';
   }catch(e){el.innerHTML='<div class="empty" style="padding:40px"><p class="muted">Map did not render here. It works when opened directly on a phone.</p></div>';}
 }
-function openJobMap(id){sheet('Site map',`<div id="map" style="height:70vh"></div>`,()=>{if(mapObj){mapObj.remove();mapObj=null;}},true);setTimeout(()=>drawMap(id),80);}
+function openJobMap(id){sheet('Site map',`<div id="map" style="height:70vh;height:70dvh"></div>`,()=>{if(mapObj){mapObj.remove();mapObj=null;}},true);setTimeout(()=>drawMap(id),80);}
 let pinMap=null,pinMarker=null,pinLL=null;
 function openPinEditor(unitId){const u=unitById(unitId);if(!u)return;const g=unitGps(u);pinLL=g?{lat:g.lat,lng:g.lng}:null;const site=(u.locationType==='show'&&showById(u.locationId)&&showById(u.locationId).site)?showById(u.locationId).site:null;const st=g?{lat:g.lat,lng:g.lng,z:17}:(site?{lat:site.lat,lng:site.lng,z:16}:{lat:39.5,lng:-98.35,z:4});
-  sheet('Adjust pin',`<p class="muted" style="margin-top:0">Drag the pin, or tap the map, to set where this unit is. Saves as a new placement.</p><div id="pinmap" style="height:56vh;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--surface2)"></div><button class="btn primary block" style="margin-top:12px" onclick="savePin('${unitId}')">Save pin</button>`,()=>{if(pinMap){try{pinMap.remove();}catch(e){}pinMap=null;}});
+  sheet('Adjust pin',`<p class="muted" style="margin-top:0">Drag the pin, or tap the map, to set where this unit is. Saves as a new placement.</p><div id="pinmap" style="height:56vh;height:56dvh;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--surface2)"></div><button class="btn primary block" style="margin-top:12px" onclick="savePin('${unitId}')">Save pin</button>`,()=>{if(pinMap){try{pinMap.remove();}catch(e){}pinMap=null;}});
   setTimeout(()=>initPinMap(st),140);}
 function initPinMap(st){const el=$('#pinmap');if(!el||typeof L==='undefined')return;if(pinMap){try{pinMap.remove();}catch(e){}pinMap=null;}pinMarker=null;pinMap=makeMap(el).setView([st.lat,st.lng],st.z);if(pinLL)setPin(pinLL.lat,pinLL.lng);pinMap.on('click',e=>setPin(e.latlng.lat,e.latlng.lng));setTimeout(()=>{try{pinMap.invalidateSize();}catch(e){}},250);}
 function setPin(lat,lng){if(!pinMap)return;const icon=L.divIcon({className:'',html:'<div style="width:20px;height:20px;border-radius:50%;background:#c77455;border:3px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.6),0 2px 6px rgba(0,0,0,.5)"></div>',iconSize:[20,20]});if(pinMarker){pinMarker.setLatLng([lat,lng]);}else{pinMarker=L.marker([lat,lng],{icon,draggable:true}).addTo(pinMap);pinMarker.on('dragend',()=>{const p=pinMarker.getLatLng();pinLL={lat:+p.lat.toFixed(6),lng:+p.lng.toFixed(6)};});}pinLL={lat:+(+lat).toFixed(6),lng:+(+lng).toFixed(6)};}
