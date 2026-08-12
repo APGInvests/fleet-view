@@ -12,7 +12,7 @@
    - Only the five CDN hosts below are cache-first. Backend requests must never be
      intercepted (auth/realtime/PostgREST all break on cached responses); tiles and
      geocoding pass straight through. */
-const VERSION = 'fv-sw-4';
+const VERSION = 'fv-sw-5';   /* fv-sw-5: deps-pin-sri — flush CDN cache so every phone refetches the pinned+SRI set */
 const KILL = false;
 const SHELL = VERSION + '-shell', CDN = VERSION + '-cdn';
 const CDN_HOSTS = ['unpkg.com', 'cdn.jsdelivr.net', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com'];

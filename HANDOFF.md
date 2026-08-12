@@ -23,7 +23,7 @@ Primary users: field technicians, a crew chief, and the owner. Multi-user, one s
 
 **Scope of the no-dependency rule (settled 2026-08-02):** it protects `index.html` and the no-build-step deploy — *not* the archive tooling. `tools/` carries its own devDependencies (`pdfkit` + `sharp`, for the archive site map; `cd tools && npm install`, `node_modules` gitignored). A missing install never affects a deploy: preflight and the invariant suite stay zero-dependency, and `fv_archive.js` records a loud shortfall instead of silently skipping the map.
 
-**Libraries, all from CDN** (no local deps):
+**Libraries, all from CDN** (no local deps). **Since 2026-08-11 (`deps-pin-sri`) every package-CDN tag carries an exact version pin + SRI `integrity` hash + `crossorigin="anonymous"`** — supabase-js was a floating `@2`, which combined with the SW's cache-first CDN policy meant different phones could run different library versions depending on when each first cached it. The pin (2.112.3) froze the exact bytes `@2` was serving. Upgrading a library now means: change the version in the URL, recompute the sha384 (`curl -sL <url> | openssl dgst -sha384 -binary | openssl base64 -A`), bump the SW VERSION. Google Fonts CSS is the one deliberate SRI exemption (per-UA response, unhashable). Enforced by `tools/fv_inv_head.js`.
 
 | Library | Version | Used for |
 |---|---|---|
@@ -31,7 +31,7 @@ Primary users: field technicians, a crew chief, and the owner. Multi-user, one s
 | Leaflet.markercluster | 1.5.3 | pin clustering / spiderfy |
 | html5-qrcode | 2.3.8 | barcode + QR scanning |
 | qrcodejs | 1.0.0 | generating a QR for the app link |
-| @supabase/supabase-js | v2 | backend client |
+| @supabase/supabase-js | 2.112.3 (pinned) | backend client |
 
 (Chart.js 4.4.1 was loaded-but-unused; removed 2026-08-11, build `chartjs-rm` — see §7.)
 
