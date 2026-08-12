@@ -319,6 +319,8 @@ The owner repeatedly declined features to keep the app usable. Every item below 
 
 **"Reset ALL data" — resolved 2026-07-30 (build `delete-gate`).** Removed entirely, along with the sample-data loader; unit deletion now requires typing DELETE and shows the history count it will destroy.
 
+**Version watch-list — best-practices audit 2026-08-11, decided non-actions.** (a) **Leaflet stays pinned at 1.9.4**: Leaflet 2.0 is ESM-only and drops the global `L`; markercluster has no compatible release, and ESM conflicts with the no-build single file. Revisit only when markercluster ships 2.x support. (b) **html5-qrcode is unmaintained** (its zxing-js core too). It works and already prefers the native BarcodeDetector; if a future iOS/Chrome release breaks it, the swap is native BarcodeDetector + a polyfill — do not upgrade-for-upgrading. (c) **supabase-js v3 is coming**; we pass no custom `lock`, so migration is re-pin + re-hash + test when it stabilizes. (d) **CSP / `defer` / `'use strict'` deliberately skipped**: meta-CSP is theater with inline handlers everywhere and no header control on Pages; `defer` breaks inline-script ordering for marginal gain; strict mode on this battle-tested script is risk without user value. (e) Nominatim venue search sends no custom User-Agent (browsers can't) — accepted, volume is a handful of calls per show.
+
 **Tap targets below guideline.** `.closex` is 34 px; `.backbtn` has `padding:0` around a 16 px SVG (~20 px effective). Should be ≥44 px — users wear gloves.
 
 **No way to edit a job from the job screen.** `editShow()` exists but is unreachable from job detail; the jobs-list swipe only offers Delete.
