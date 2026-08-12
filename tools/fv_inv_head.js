@@ -41,4 +41,16 @@ module.exports = (app, t) => {
   t.includes(rule('body'), 'overscroll-behavior-y:none', 'body forbids pull-to-refresh');
   t.includes(css.match(/\.sheet\{([^}]*)\}/)[1], 'overscroll-behavior:contain',
     'sheets contain scroll-chaining — a sheet at its top edge never hands the gesture to the page');
+
+  t.group('pwa icons: declared, present, maskable variant included');
+  const path = require('path');
+  const dir = path.dirname(app.file);
+  const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+  const icons = manifest.icons || [];
+  t.ok(icons.some((i) => i.sizes === '512x512' && i.purpose === 'any'), 'manifest declares a 512 any icon');
+  t.ok(icons.some((i) => i.purpose === 'maskable'), 'manifest declares a maskable icon (circle-crop safe)');
+  for (const i of icons) t.ok(fs.existsSync(path.join(dir, i.src)), i.src + ' exists on disk');
+  t.includes(head, 'rel="apple-touch-icon"', 'head links apple-touch-icon (iOS ignores the manifest)');
+  t.includes(head, 'rel="icon"', 'head links a favicon');
+  t.ok(fs.existsSync(path.join(dir, 'icons', 'apple-touch-icon.png')), 'apple-touch-icon.png exists on disk');
 };
