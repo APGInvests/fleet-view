@@ -212,6 +212,81 @@ module.exports = async (app, t) => {
   t.includes(app.document.querySelector('#syncChip').textContent, 'no offline backup', 'a broken durable cache is LOUD (audit A2)');
   app.live.CACHE_BROKEN = false; app.fn.updateSyncChip();
 
+  t.group('cache restore: schema growth never manufactures conflicts (mass false-overwritten, 2026-08-13)');
+  /* The incident: adding units.has_def to MAPS changed toRow's serialization,
+   * so every pre-upgrade cached SNAP string mismatched — 274 untouched rows
+   * read "dirty", tied on updatedAt (>= parks the tie), and the whole fleet
+   * parked in SYNC_LOST at one page-load. On restore, SNAP strings must be
+   * normalized through the CURRENT schema: key growth/removal/order washes
+   * out; real value differences stay dirty. Dirt is never laundered. */
+  const doctorCache = async (mutate) => {
+    app.setState({ units: [
+      mkUnit({ id: 'u-n1', serial: 'N1', updatedAt: 7000, hasDef: null }),
+      mkUnit({ id: 'u-n2', serial: 'N2', updatedAt: 7000, hasDef: null }),
+      mkUnit({ id: 'u-n3', serial: 'N3', updatedAt: 7000, hasDef: null }),
+    ], shows: [{ id: 'show-A', name: 'A' }] });
+    app.SYNC_READY = true; app.live.DEAD = {}; app.live.SYNC_LOST = [];
+    const clean = app.S.units.map((o) => app.fn.fromRow('units', app.fn.toRow('units', o)));
+    app.timers.length = 0; app.fn.persistCache(); app.flushTimers(); await Promise.resolve();
+    const cc = await app.live.KV.get('cache');
+    for (const uid2 in cc.snap.units) {                    /* pre-has_def vintage */
+      const row = JSON.parse(cc.snap.units[uid2]); delete row.has_def;
+      cc.snap.units[uid2] = JSON.stringify(row);
+    }
+    cc.tables.units.forEach((u) => { delete u.hasDef; });
+    if (mutate) mutate(cc);
+    await app.live.KV.set('cache', cc);
+    app.setState({ units: [], shows: [] }); app.live.SYNC_LOST = [];
+    const ok2 = await app.fn.hydrateFromCache();
+    return { clean, hydrated: ok2 };
+  };
+
+  const { clean } = await doctorCache();
+  app.fn.mergeServerState('units', clean.map((o) => Object.assign({}, o)));
+  t.eq(app.live.SYNC_LOST.length, 0, 'identical server rows + grown schema parks NOTHING');
+  t.eq(app.S.units.length, 3, 'all rows survive the merge');
+  t.ok(app.fn.dirtyCount() === 0, 'and nothing reads dirty (got ' + app.fn.dirtyCount() + ')');
+
+  const edited = await doctorCache((cc) => {
+    const u3 = cc.tables.units.find((x) => x.id === 'u-n3');
+    u3.notes = 'FIELD EDIT'; u3.updatedAt = 8000;         /* real unsaved edit, locally newer */
+  });
+  app.fn.mergeServerState('units', edited.clean.map((o) => Object.assign({}, o)));
+  t.eq(app.live.SYNC_LOST.length, 0, 'locally-newer real edit parks nothing');
+  const u3m = app.S.units.find((x) => x.id === 'u-n3');
+  t.ok(u3m && u3m.notes === 'FIELD EDIT', 'the real edit WINS the merge (normalization never launders dirt)');
+  const newer = edited.clean.map((o) => Object.assign({}, o, o.id === 'u-n3' ? { updatedAt: 9000 } : {}));
+  app.fn.mergeServerState('units', newer);
+  t.eq(app.live.SYNC_LOST.length, 1, 'server-newer real conflict still parks — exactly the one row');
+  t.eq(app.live.SYNC_LOST[0] && app.live.SYNC_LOST[0].serial, 'N3', 'and it is the edited row, by serial');
+
+  const bad2 = await doctorCache((cc) => { cc.snap.units['u-n1'] = '{corrupt'; });
+  t.ok(bad2.hydrated, 'a malformed SNAP string never breaks hydrate');
+  t.eq(app.S.units.length, 3, 'rows all restored despite the bad string');
+
+  t.group('sync sheet: overwritten list has dismiss-all, and dismissals persist');
+  app.setState({ shows: [], units: [] });
+  app.live.SYNC_LOST = [
+    { table: 'units', serial: 'A1', row: { notes: 'x' }, ts: 1 },
+    { table: 'units', serial: 'A2', row: {}, ts: 1 },
+    { table: 'units', serial: 'A3', row: {}, ts: 1 }];
+  app.fn.openSyncStatus();
+  const shL = app.document.querySelector('#sheet').innerHTML;
+  t.includes(shL, 'dismissAllLost', 'dismiss-all control exists (274 taps is not a workflow)');
+  t.ok(typeof app.fn.dismissAllLost === 'function', 'dismissAllLost is wired');
+  app.timers.length = 0;
+  if (typeof app.fn.dismissAllLost === 'function') app.fn.dismissAllLost();
+  t.eq(app.live.SYNC_LOST.length, 0, 'one tap clears the whole list');
+  t.excludes(app.document.querySelector('#sheet').innerHTML, 'Overwritten while unsaved', 'sheet re-renders without the section');
+  app.flushTimers(); await Promise.resolve();
+  const cAfter = await app.live.KV.get('cache');
+  t.eq((cAfter && cAfter.lost || []).length, 0, 'dismiss-all persists — the list must not resurrect on reload');
+  app.live.SYNC_LOST = [{ table: 'units', serial: 'B1', row: {}, ts: 1 }, { table: 'units', serial: 'B2', row: {}, ts: 1 }];
+  app.timers.length = 0; app.fn.dismissLost(0); app.flushTimers(); await Promise.resolve();
+  const cOne = await app.live.KV.get('cache');
+  t.eq((cOne && cOne.lost || []).length, 1, 'single dismiss persists too');
+  app.live.SYNC_LOST = []; app.fn.updateSyncChip();          /* leave no state for the next group */
+
   t.group('storage persist: requested at boot, denial surfaces in sheet only (never the chip)');
   t.includes(String(app.fn.boot), 'requestPersist()', 'boot requests persistent storage for the write queue');
   try { app.fn.requestPersist(); t.ok(true, 'requestPersist tolerates a navigator without storage'); }
