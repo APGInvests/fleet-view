@@ -307,7 +307,7 @@ const LIVE_BINDINGS = [
   'DEAD', 'KV', 'OFFLINE',
   'SYNC_FAILS', 'SYNC_LOST', 'DEAD',
   'NET_DOWN', 'CACHE_BROKEN', 'CACHE_AGE', 'RETRYABLE',
-  'STORAGE_PERSISTED',
+  'STORAGE_PERSISTED', 'scanAskHours',
 ];
 
 /* ------------------------------------------------------------------ *

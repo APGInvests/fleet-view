@@ -78,4 +78,81 @@ module.exports = async (app, t) => {
   app.document.querySelector('#f_serial').value = 'LOCKBIG1';
   app.fn.saveUnit('u-lock');
   t.eq(app.S.units.find((u) => u.id === 'u-lock').klass, 'big', 'editing a big unit never flips klass');
+
+  t.group('scan unload: opt-in hours capture — the happy path is untouched');
+  /* Bourbon load-in 2026-09-07: 25 units scanned in 11 minutes, zero hour
+   * readings — the batch loop is fast BECAUSE it asks nothing. Hours capture
+   * is a per-session MODE the tech chooses (default OFF, resets every boot),
+   * never a field in everyone's path. With it on: scan → destination →
+   * one optional meter field for THAT machine → scanner. The move is
+   * recorded BEFORE the hours ask — hours never gate an arrival. */
+  app.setState({
+    units: [mkUnit({ id: 'u-sh1', serial: 'SH1', klass: 'small', currentHours: 5000, updatedAt: 1 }),
+            mkUnit({ id: 'u-sh2', serial: 'SH2', klass: 'small', updatedAt: 1 }),
+            mkUnit({ id: 'u-sh3', serial: 'SH3', klass: 'small', updatedAt: 1 }),
+            mkUnit({ id: 'u-tw', serial: 'TW1', klass: 'big', config: 'TwinPak',
+                     engines: { style: 'AB', A: { kvaEach: 438 }, B: { kvaEach: 438 } }, updatedAt: 1 })],
+    shows: [{ id: 'show-A', name: 'A' }, { id: 'show-B', name: 'B' }] });
+  app.S.settings.techName = 'Mike R.'; app.S.currentShowId = 'show-A';
+  t.eq(!!app.live.scanAskHours, false, 'mode is OFF by default, every session');
+
+  app.fn.doMoveScan('u-sh1', 'show', 'show-B'); app.flushTimers();
+  t.excludes(app.document.querySelector('#sheet').innerHTML, 'sh_hrs', 'mode off: no hours screen — todays flow byte-for-byte');
+  t.eq(app.S.movements.filter((m) => m.unitId === 'u-sh1').length, 1, 'move recorded as always');
+
+  app.fn.openScan('job');
+  t.includes(app.document.querySelector('#sheet').innerHTML, 'scanHrsTgl', 'toggle lives on the scan sheet');
+  t.ok(typeof app.fn.scanAskHoursT === 'function', 'toggle is wired');
+  app.fn.scanAskHoursT();
+  t.eq(!!app.live.scanAskHours, true, 'toggle flips the mode on');
+
+  const mvBefore = app.S.movements.length;
+  app.fn.doMoveScan('u-sh1', 'show', 'show-A'); app.flushTimers();
+  t.eq(app.S.movements.length, mvBefore + 1, 'move recorded BEFORE the hours ask — hours never gate an arrival');
+  const hrsSheet = app.document.querySelector('#sheet').innerHTML;
+  t.includes(hrsSheet, 'SH1', 'hours screen names THE machine just scanned');
+  t.includes(hrsSheet, 'id="sh_hrs"', 'one meter field');
+  t.includes(hrsSheet, 'Skip', 'Skip is a first-class exit');
+  t.ok(!app.document.querySelector('#sh_hrs').value, 'meter field NEVER prefilled (observation rule — currentHours is 5000)');
+  t.excludes(hrsSheet, '5000', 'known hours nowhere in the markup either');
+
+  app.document.querySelector('#sh_hrs').value = '5100';
+  app.fn.saveScanHours('u-sh1'); app.flushTimers();
+  const rep = app.S.reports.filter((r) => r.unitId === 'u-sh1').slice(-1)[0];
+  t.ok(rep && rep.engineHours === 5100, 'typed meter becomes a check row (got ' + (rep && rep.engineHours) + ')');
+  t.eq(rep && rep.notes, 'Meter reading', 'stamped as a meter reading, same convention as the edit form');
+  t.eq(rep && rep.showId, 'show-A', "stamps the unit's show");
+  t.eq(rep && rep.techName, 'Mike R.', 'stamped with who read it');
+  const u1 = app.S.units.find((x) => x.id === 'u-sh1');
+  t.eq(u1.currentHours, 5100, 'service countdown updates');
+  t.ok(u1.updatedAt > 1, 'unit mutation bumps updatedAt (LWW rule)');
+  t.excludes(app.document.querySelector('#sheet').innerHTML, 'sh_hrs', 'and the scanner loop resumes');
+
+  app.fn.doMoveScan('u-sh2', 'show', 'show-A'); app.flushTimers();
+  const repsBeforeSkip = app.S.reports.length;
+  app.fn.skipScanHours(); app.flushTimers();
+  t.eq(app.S.reports.length, repsBeforeSkip, 'Skip writes NOTHING');
+  t.excludes(app.document.querySelector('#sheet').innerHTML, 'sh_hrs', 'Skip resumes the loop');
+
+  app.fn.doMoveScan('u-sh3', 'show', 'show-A'); app.flushTimers();
+  app.document.querySelector('#sh_hrs').value = ''; /* stub caches by id; a real re-rendered input is born blank */
+  app.fn.saveScanHours('u-sh3'); app.flushTimers();
+  t.eq(app.S.reports.filter((r) => r.unitId === 'u-sh3').length, 0, 'blank Save creates nothing — blank is not-observed');
+
+  app.fn.doMoveScan('u-tw', 'show', 'show-A'); app.flushTimers();
+  const twSheet = app.document.querySelector('#sheet').innerHTML;
+  t.includes(twSheet, 'id="sh_hrsA"', 'twin gets engine-1 meter field');
+  t.includes(twSheet, 'id="sh_hrsB"', 'twin gets engine-2 meter field');
+  app.document.querySelector('#sh_hrsA').value = '100';
+  app.document.querySelector('#sh_hrsB').value = '200';
+  app.fn.saveScanHours('u-tw'); app.flushTimers();
+  const twReps = app.S.reports.filter((r) => r.unitId === 'u-tw');
+  t.eq(twReps.length, 2, 'twin meters save as two engine-tagged checks');
+  t.deep(twReps.map((r) => r.engine).sort(), ['A', 'B'], 'each tagged to its engine');
+  t.ok(app.S.units.find((x) => x.id === 'u-tw').currentHours == null, 'twin package hours NEVER merged onto the unit');
+
+  app.fn.scanAskHoursT();
+  t.eq(!!app.live.scanAskHours, false, 'toggle off restores the untouched flow');
+  app.fn.doMoveScan('u-sh2', 'show', 'show-B'); app.flushTimers();
+  t.excludes(app.document.querySelector('#sheet').innerHTML, 'sh_hrs', 'and no hours screen appears again');
 };
