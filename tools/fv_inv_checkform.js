@@ -253,7 +253,7 @@ module.exports = async (app, t) => {
   const fSd = app.document.querySelector('#sheet').innerHTML;
   t.excludes(fSd, 'v_def', 'small iron without DEF: no field');
   t.excludes(fSd, 'DEF %', 'and no label');
-  t.includes(fSd, 'grid2"><label class="fld"><span class="lb">Fuel %', 'fuel/batt row drops to grid2 — shorter form, not a gap');
+  t.includes(fSd, 'grid2"><label class="fld"><span class="lb" id="v_fuelLb">Fuel %', 'fuel/batt row drops to grid2 — shorter form, not a gap');
   t.excludes(fSd, 'vg_def_pct', 'gauge picker does not offer DEF');
   app.document.querySelector('#v_def').value = '55'; // stale cache from an earlier form must not leak into the save
   app.document.querySelector('#v_notes').value = '';
@@ -263,7 +263,7 @@ module.exports = async (app, t) => {
   app.fn.logVitals('u-sy');
   const fSy = app.document.querySelector('#sheet').innerHTML;
   t.includes(fSy, 'v_def', 'small iron WITH has_def: field renders');
-  t.includes(fSy, 'grid3"><label class="fld"><span class="lb">Fuel %', 'fuel/batt/DEF row back to grid3');
+  t.includes(fSy, 'grid3"><label class="fld"><span class="lb" id="v_fuelLb">Fuel %', 'fuel/batt/DEF row back to grid3');
   t.includes(fSy, 'vg_def_pct', 'gauge picker offers DEF again');
   app.document.querySelector('#v_def').value = '42';
   app.fn.saveVitals('u-sy');
