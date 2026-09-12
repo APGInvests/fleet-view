@@ -241,6 +241,60 @@ module.exports = async (app, t) => {
     app.fn.setFuelUnit('show-A', 'pct');
   }
 
+  t.group('fuel-inches: stick-mark tap targets — 4x2 grid, one per painted mark, inches mode only');
+  {
+    app.localStorage.removeItem(FKEY);
+    const u = mkUnit({ id: 'u-fu-m' });
+    const hp = mkUnit({ id: 'u-fu-m2', make: 'HiPower', model: '', serial: 'HP-4' });
+    const shop = mkUnit({ id: 'u-fu-m3', locationType: 'fleet', locationId: null });
+    app.setState({ units: [u, hp, shop], shows: [{ id: 'show-A', name: 'A' }], reports: [] });
+    app.S.settings.techName = 'Mike R.';
+    const sheetHtml = () => app.document.querySelector('#sheet').innerHTML;
+    const inp = () => app.document.querySelector('#v_fuel');
+
+    app.fn.setFuelUnit('show-A', 'in');
+    app.fn.logVitals('u-fu-m');
+    t.includes(sheetHtml(), 'id="v_fuelMarks" style="display:grid', 'inches mode: the mark grid renders visible');
+    ['1⅜','2¾','4⅛','5½','6⅞','8¼','9⅝','11'].forEach((m, i) =>
+      t.includes(sheetHtml(), `onclick="fuelMarkT(${i + 1})">${m}<`, `mark ${m} is target ${i + 1} — all eight painted marks, never collapsed to quarters`));
+    t.includes(sheetHtml(), 'min-height:44px', 'targets hold the 44px minimum');
+    t.includes(sheetHtml(), 'repeat(4,1fr)', 'four across — 44px+ wide on every phone incl. SE');
+
+    app.fn.fuelMarkT(4);
+    t.eq(inp().value, '5.5', 'tapping the 5½ mark fills the field with 5.5');
+    t.eq(app.document.querySelector('#v_fuelEcho').textContent, '= 5½″ · 50%', 'and the echo confirms it');
+    t.ok(app.document.querySelector('#v_fm_4').classList.contains('on'), 'the tapped mark lights up');
+    t.ok(!app.document.querySelector('#v_fm_1').classList.contains('on'), 'and only that mark');
+    inp().value = '1.3';
+    app.fn.fuelEcho();
+    t.ok(!app.document.querySelector('#v_fm_4').classList.contains('on'), 'typing an off-mark value clears the highlight — the marks never claim a reading they do not match');
+    inp().value = '';
+    app.fn.fuelEcho();
+
+    app.fn.fuelMarkT(4);
+    const FIELDS = ['#v_ll','#v_ln','#v_a1','#v_a2','#v_a3','#v_hz','#v_kw','#v_ct','#v_op','#v_fp','#v_bat','#v_def','#v_hrs','#v_notes'];
+    FIELDS.forEach((s) => { app.document.querySelector(s).value = ''; });
+    await app.fn.saveVitals('u-fu-m', '');
+    const sr = app.S.reports.find((r) => r.unitId === 'u-fu-m' && r.fuelLevelPct != null);
+    t.eq(sr && sr.fuelLevelPct, 50, 'tap then save stores pct — buttons only fill the field, storage path unchanged');
+
+    app.fn.setFuelUnit('show-A', 'pct');
+    app.fn.logVitals('u-fu-m');
+    t.includes(sheetHtml(), 'id="v_fuelMarks" style="display:none', 'pct mode on a spec unit: grid present but display:none — zero height for %% techs');
+    app.document.querySelector('#v_fuel').value = '50';
+    app.fn.fuelModeT('in');
+    t.eq(app.document.querySelector('#v_fuelMarks').style.display, 'grid', 'mid-form toggle to inches reveals the marks without a rebuild');
+    t.ok(app.document.querySelector('#v_fm_4').classList.contains('on'), 'and the converted 5.5 lights its mark');
+    app.fn.fuelModeT('pct');
+    t.eq(app.document.querySelector('#v_fuelMarks').style.display, 'none', 'toggle back hides them');
+
+    app.fn.logVitals('u-fu-m2');
+    t.excludes(sheetHtml(), 'v_fuelMarks', 'no-spec unit: zero mark markup, not merely hidden');
+    app.fn.logVitals('u-fu-m3');
+    t.excludes(sheetHtml(), 'v_fuelMarks', 'spec unit off-show: zero mark markup');
+    app.fn.setFuelUnit('show-A', 'pct');
+  }
+
   t.group('fuel-inches: unit detail — readout toggle rendered only where eligible');
   {
     app.localStorage.removeItem(FKEY);
