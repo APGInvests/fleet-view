@@ -202,6 +202,45 @@ module.exports = async (app, t) => {
     t.eq(saved() && saved().fuelLevelPct, 50, 'pct mode: 50 stores as 50, byte-identical to before this feature');
   }
 
+  t.group('fuel-inches: echo line — confirms the stick mark as typed, display-only, inches mode only');
+  {
+    app.localStorage.removeItem(FKEY);
+    const u = mkUnit({ id: 'u-fu-e' });
+    const shop = mkUnit({ id: 'u-fu-e2', locationType: 'fleet', locationId: null });
+    app.setState({ units: [u, shop], shows: [{ id: 'show-A', name: 'A' }] });
+    app.S.settings.techName = 'Mike R.';
+    const echo = () => app.document.querySelector('#v_fuelEcho');
+    const typed = (v) => { app.document.querySelector('#v_fuel').value = v; app.fn.fuelEcho(); return echo().textContent; };
+
+    app.fn.setFuelUnit('show-A', 'in');
+    app.fn.logVitals('u-fu-e');
+    t.includes(app.document.querySelector('#sheet').innerHTML, 'v_fuelEcho', 'echo line rendered in the form markup');
+    t.includes(app.document.querySelector('#sheet').innerHTML, 'oninput="fuelEcho()"', 'fuel input drives the echo live');
+    t.eq(typed('4.125'), '= 4⅛″ · 38%', 'typed 4.125 echoes the stick mark it means, with the stored pct');
+    t.eq(typed('1.3'), '= 1⅜″ · 12%', 'an off-mark value echoes the mark it snaps to — the tech SEES the snap');
+    t.eq(typed('11'), '= 11″ · 100%', 'full tank echoes clean');
+    t.eq(typed('15'), '= 11″ · 100%', 'over-full echoes the clamp, not a fantasy reading');
+    t.eq(typed(''), '', 'empty field echoes nothing — the echo never suggests a value');
+    t.eq(echo().style.display, 'none', 'and the empty echo takes no space');
+    t.excludes(echo().textContent + echo().innerHTML, 'onclick', 'echo is text, never a control');
+
+    app.fn.setFuelUnit('show-A', 'pct');
+    app.fn.logVitals('u-fu-e');
+    t.eq(typed('50'), '', 'pct mode: echo stays empty — zero footprint for %% techs');
+    t.eq(echo().style.display, 'none', 'pct mode: echo takes zero height');
+    app.fn.logVitals('u-fu-e2');
+    t.eq(typed('50'), '', 'off-show spec unit: echo stays empty');
+
+    app.fn.setFuelUnit('show-A', 'pct');
+    app.fn.logVitals('u-fu-e');
+    app.document.querySelector('#v_fuel').value = '50';
+    app.fn.fuelModeT('in');
+    t.eq(echo().textContent, '= 5½″ · 50%', 'mid-form toggle to inches converts the value AND lights the echo');
+    app.fn.fuelModeT('pct');
+    t.eq(echo().textContent, '', 'toggle back to %% clears the echo');
+    app.fn.setFuelUnit('show-A', 'pct');
+  }
+
   t.group('fuel-inches: unit detail — readout toggle rendered only where eligible');
   {
     app.localStorage.removeItem(FKEY);
