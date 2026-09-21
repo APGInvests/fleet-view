@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-09-21 add-flow-clarity + move-uuid-null -->
+<!-- fleetview build 2026-09-21 add-sheet-steps -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1178,14 +1178,17 @@ let addMode='job';
 function openScan(mode){addMode=(mode==='fleet'||(!mode&&TAB==='fleet'))?'fleet':'job';
   if(addMode==='job'&&!currentShow()){toast('Open a job first');go('jobs');return;}
   const fleet=addMode==='fleet';
+  if(!fleet)scanAskHours=!!scanHoursMap()[currentShow().id]; /* hydrate this job's remembered choice */
   const title=fleet?'Add asset to fleet':('Add to '+currentShow().name);
-  const intro=fleet?`Type the serial. Already in the fleet? It just opens — no duplicates.`:`Type the serial. Already in the fleet? It moves onto <b>${esc(currentShow().name)}</b> — no duplicates.`;
+  /* Three steps, sun-readable: full body size, normal ink — a tech should know
+     what to do in seconds. Only helper lines below go muted. */
+  const steps=`<div id="scanSteps" style="font-size:16px;line-height:1.55;margin:0 0 12px">1 · Type the serial<br/>2 · Already in the fleet? Tap it — ${fleet?'it just opens':`it moves onto <b>${esc(currentShow().name)}</b>`}. No duplicates.<br/>3 · Not found? Add it as a new asset.</div>`;
   /* Serial-first (2026-09-21, add-flow-clarity): typing is the proven field
      path — Bourbon's 25-unit loop was typed, and every duplicate incident was
      a typo, not a misread. The camera starts ONLY on request (no permission
      prompt for typers) and stays open for the session once asked for, so a
      scanning rhythm through the batch loop isn't taxed a tap per unit. */
-  sheet(title,`<p class="muted" style="margin-top:0">${intro}</p><label class="fld"><span class="lb">Search the fleet by serial</span><input id="assetSearch" placeholder="Type a serial…" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" style="text-transform:uppercase" oninput="searchFleet(this.value)"/></label><div id="searchResults"></div><button class="btn primary block" style="margin-top:6px" onclick="addNewFromSearch()">+ Add new asset</button><button type="button" id="scanHrsTgl" class="btn sm" style="margin:12px 0 10px;border:1.5px solid ${scanAskHours?'var(--green)':'var(--line)'};background:transparent;color:${scanAskHours?'var(--green)':'var(--ink2)'}" onclick="scanAskHoursT()">${scanAskHours?'⏱ Asking hours after each scan · ON':'⏱ Ask hours after each scan'}</button><button id="scanCamBtn" class="btn ghost block" style="${scanCamOpen?'display:none':''}" onclick="scanCamT()">📷 Scan a barcode instead</button><div id="camWrap" style="${scanCamOpen?'':'display:none'}"><div id="reader" style="min-height:200px;border-radius:14px;overflow:hidden;background:rgba(128,128,128,.12)"></div><div id="scanMsg" class="muted" style="text-align:center;margin:9px 0;font-size:13px">Starting camera…</div><button id="torchBtn" class="btn ghost block" style="display:none;margin-bottom:4px" onclick="toggleTorch()">🔦 Light</button></div>`,stopScanner);
+  sheet(title,`${steps}<label class="fld"><span class="lb">Search the fleet by serial</span><input id="assetSearch" placeholder="Type a serial…" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" style="text-transform:uppercase" oninput="searchFleet(this.value)"/></label><div id="searchResults"></div><button id="addNewBtn" class="btn primary block" style="margin-top:6px;display:none" onclick="addNewFromSearch()">+ Add new asset</button><button type="button" id="scanHrsTgl" class="btn sm" style="margin:12px 0 4px;border:1.5px solid ${scanAskHours?'var(--green)':'var(--line)'};background:transparent;color:${scanAskHours?'var(--green)':'var(--ink2)'}" onclick="scanAskHoursT()">${scanAskHours?'⏱ Logging hours after each unit · ON':'⏱ Log hours too?'}</button><p class="muted" style="font-size:12px;margin:0 0 10px">Optional — the unit is received either way. Skip anytime.</p><button id="scanCamBtn" class="btn ghost block" style="${scanCamOpen?'display:none':''}" onclick="scanCamT()">📷 Scan a barcode instead</button><div id="camWrap" style="${scanCamOpen?'':'display:none'}"><div id="reader" style="min-height:200px;border-radius:14px;overflow:hidden;background:rgba(128,128,128,.12)"></div><div id="scanMsg" class="muted" style="text-align:center;margin:9px 0;font-size:13px">Starting camera…</div><button id="torchBtn" class="btn ghost block" style="display:none;margin-bottom:4px" onclick="toggleTorch()">🔦 Light</button></div>`,stopScanner);
   if(scanCamOpen)startScanner();else setTimeout(()=>{const i=$('#assetSearch');if(i&&i.focus)try{i.focus();}catch(e){}},60);}
 let scanCamOpen=false; /* session-only, resets every boot by construction */
 function scanCamT(){scanCamOpen=true;const w=$('#camWrap');if(w)w.style.display='';const b=$('#scanCamBtn');if(b)b.style.display='none';startScanner();}
@@ -1202,13 +1205,18 @@ function handleCode(code){code=String(code||'').trim().toUpperCase();if(!code){t
   const near=nearMatches(code,4);if(!near.length){editUnit(null,code);return;}
   sheet('No exact match',`<p class="muted" style="margin-top:0">Nothing in the fleet reads <b>${esc(code)}</b> exactly. Did you mean:</p>${near.map(u=>`<div class="card" style="padding:10px 12px;margin-bottom:7px;cursor:pointer" onclick="pickAsset('${u.id}')"><div class="between"><b style="font-size:14px">#${esc(u.serial||u.tagId||'—')}</b><span class="muted" style="font-size:11px">${esc(whereIs(u))}</span></div><div class="muted" style="font-size:12px;margin-top:2px">${esc([u.make,u.model].filter(Boolean).join(' ')||'—')}${u.kw?(' · '+u.kw+' kVA'):''}</div></div>`).join('')}<button class="btn ghost block" style="margin-top:6px" onclick="editUnit(null,'${esc(code)}')">+ Add new asset “${esc(code)}” anyway</button>`,stopScanner);}
 function pickAsset(unitId){const u=unitById(unitId);if(!u)return;stopScanner();const s=currentShow();if(addMode!=='fleet'&&s&&u.locationType==='show'&&u.locationId===s.id){closeSheet();openUnit(unitId);toast('Already on this job');return;}moveMenu(unitId,true);}
-function searchFleet(q){const box=$('#searchResults');if(!box)return;q=String(q||'').trim();if(!q){box.innerHTML='';return;}const ql=q.toLowerCase();const s=currentShow();
+/* "+ Add new asset" earns its loudness: hidden until a search exists (a loud
+   add button before searching is how duplicates happen), ghost while match
+   cards are on screen (the cards are the suggestion), primary only on a miss —
+   exactly when the results copy says "Tap + Add new asset". */
+function addNewVis(show,loud){const b=$('#addNewBtn');if(!b)return;b.style.display=show?'':'none';b.className='btn '+(loud?'primary':'ghost')+' block';}
+function searchFleet(q){const box=$('#searchResults');if(!box)return;q=String(q||'').trim();if(!q){box.innerHTML='';addNewVis(false,true);return;}const ql=q.toLowerCase();const s=currentShow();
   const card=u=>{const here=(addMode==='job'&&s&&u.locationType==='show'&&u.locationId===s.id);return `<div class="card" style="padding:10px 12px;margin-bottom:7px;cursor:pointer" onclick="pickAsset('${u.id}')"><div class="between"><b style="font-size:14px">#${esc(u.serial||u.tagId||'—')}</b>${here?'<span class="pill" style="background:var(--green)">on this job</span>':`<span class="muted" style="font-size:11px">${esc(whereIs(u))}</span>`}</div><div class="muted" style="font-size:12px;margin-top:2px">${esc([u.make,u.model].filter(Boolean).join(' ')||'—')}${u.kw?(' · '+u.kw+' kVA'):''}</div></div>`;};
   const hits=S.units.filter(u=>[u.serial,u.tagId,u.make,u.model,(u.kw?u.kw+' kva':'')].some(x=>String(x||'').toLowerCase().includes(ql))).slice(0,6);
-  if(hits.length){box.innerHTML=hits.map(card).join('');return;}
+  if(hits.length){box.innerHTML=hits.map(card).join('');addNewVis(true,false);return;}
   const near=nearMatches(q,4);
-  if(near.length){box.innerHTML='<div class="muted" style="font-size:13px;padding:8px 2px">No exact match. Did you mean:</div>'+near.map(card).join('')+'<div class="muted" style="font-size:12px;padding:2px 2px 6px">Not one of these? “+ Add new asset” adds it exactly as typed.</div>';return;}
-  box.innerHTML='<div class="muted" style="font-size:13px;padding:8px 2px">No match in the fleet. Tap “+ Add new asset”.</div>';}
+  if(near.length){box.innerHTML='<div class="muted" style="font-size:13px;padding:8px 2px">No exact match. Did you mean:</div>'+near.map(card).join('')+'<div class="muted" style="font-size:12px;padding:2px 2px 6px">Not one of these? “+ Add new asset” adds it exactly as typed.</div>';addNewVis(true,true);return;}
+  box.innerHTML='<div class="muted" style="font-size:13px;padding:8px 2px">No match in the fleet. Tap “+ Add new asset”.</div>';addNewVis(true,true);}
 function addNewFromSearch(){const el=$('#assetSearch');const q=el?el.value.trim():'';stopScanner();editUnit(null,q);}
 /* ===== GPS ===== */
 let lastGPS=null,formGps=null;
@@ -1263,7 +1271,15 @@ function doMoveScan(unitId,type,id){const u=unitById(unitId);if(!u)return;id=id|
    convention as the twin fields on the edit form) — an observation with a name
    on it, never a bare column write. Blank/Skip creates nothing. */
 let scanAskHours=false;
-function scanAskHoursT(){scanAskHours=!scanAskHours;const b=$('#scanHrsTgl');if(b){b.style.borderColor=scanAskHours?'var(--green)':'var(--line)';b.style.color=scanAskHours?'var(--green)':'var(--ink2)';b.textContent=scanAskHours?'⏱ Asking hours after each scan · ON':'⏱ Ask hours after each scan';}}
+/* Per-JOB memory (2026-09-21, supersedes "resets every boot"): the choice
+   sticks to the show, fuelUnitMap pattern — only ON is stored, OFF deletes
+   the key, so a job never set defaults OFF by construction. Fleet-mode keeps
+   session-only semantics (no job to key on). The global stays the single
+   read point for the batch loop; openScan hydrates it per job. */
+const SCANHRS_KEY='fleetview_scanhours_v1';
+function scanHoursMap(){try{return JSON.parse(localStorage.getItem(SCANHRS_KEY)||'{}');}catch(e){return {};}}
+function setScanHours(sid,on){const m=scanHoursMap();if(on)m[sid]=1;else delete m[sid];try{localStorage.setItem(SCANHRS_KEY,JSON.stringify(m));}catch(e){}}
+function scanAskHoursT(){scanAskHours=!scanAskHours;if(addMode==='job'){const s=currentShow();if(s)setScanHours(s.id,scanAskHours);}const b=$('#scanHrsTgl');if(b){b.style.borderColor=scanAskHours?'var(--green)':'var(--line)';b.style.color=scanAskHours?'var(--green)':'var(--ink2)';b.textContent=scanAskHours?'⏱ Logging hours after each unit · ON':'⏱ Log hours too?';}}
 function scanHoursSheet(unitId,type,id){const u=unitById(unitId);if(!u){openScan();return;}const tw=isTwin(u);
   sheet('Hours · #'+esc(u.serial||u.tagId||''),`<p class="muted" style="margin-top:0">→ ${esc(locName(type,id))}. Meter reading while you're at the machine — optional. Skip is fine.</p>${tw?`<div class="grid2"><label class="fld"><span class="lb">${esc(engName(u,'A'))} hours</span><input id="sh_hrsA" type="number" inputmode="decimal" placeholder="read the meter"/></label><label class="fld"><span class="lb">${esc(engName(u,'B'))} hours</span><input id="sh_hrsB" type="number" inputmode="decimal" placeholder="read the meter"/></label></div>`:`<label class="fld"><span class="lb">Engine hours</span><input id="sh_hrs" type="number" inputmode="decimal" placeholder="read the meter"/></label>`}<button class="btn primary block" onclick="saveScanHours('${unitId}')">Save → next scan</button><button class="btn ghost block" style="margin-top:9px" onclick="skipScanHours()">Skip → next scan</button>`);}
 function saveScanHours(unitId){const u=unitById(unitId);if(!u){openScan();return;}const grab=x=>{const el=$('#'+x);return el?num(el.value):null;};

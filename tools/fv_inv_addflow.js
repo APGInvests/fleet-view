@@ -82,7 +82,9 @@ module.exports = async (app, t) => {
   t.group('scan unload: opt-in hours capture — the happy path is untouched');
   /* Bourbon load-in 2026-09-07: 25 units scanned in 11 minutes, zero hour
    * readings — the batch loop is fast BECAUSE it asks nothing. Hours capture
-   * is a per-session MODE the tech chooses (default OFF, resets every boot),
+   * is a MODE the tech chooses (default OFF; since add-sheet-steps 2026-09-21
+   * it sticks per JOB via fleetview_scanhours_v1 — see fv_inv_addsheet.js;
+   * the global still boots false, which is what this suite pins),
    * never a field in everyone's path. With it on: scan → destination →
    * one optional meter field for THAT machine → scanner. The move is
    * recorded BEFORE the hours ask — hours never gate an arrival. */
