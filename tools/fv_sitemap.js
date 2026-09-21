@@ -69,7 +69,16 @@ function kvaOfUnit(u) {
 
 function placementText(u, showId) {
   const jm = (u.job_meta && typeof u.job_meta === 'object' && u.job_meta[showId]) || {};
-  const t = String(jm.area || jm.name || '').replace(/\s+/g, ' ').trim();
+  /* Same merge rule as jobLabel() in index.html (one-field labeling,
+   * 2026-09-21): legacy name+area pairs collapse — containing string wins,
+   * else "name — area" — so the PDF shows exactly what the app shows. */
+  const n = String(jm.name || '').replace(/\s+/g, ' ').trim();
+  const a = String(jm.area || '').replace(/\s+/g, ' ').trim();
+  let t;
+  if (n && a) {
+    const nl = n.toLowerCase(), al = a.toLowerCase();
+    t = nl.includes(al) ? n : (al.includes(nl) ? a : (n + ' — ' + a));
+  } else t = n || a;
   return t || null;
 }
 

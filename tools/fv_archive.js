@@ -551,18 +551,24 @@ async function archiveShow(show, all, totals, outRoot) {
   const rosterRows = [...roster.entries()].map(([id, e]) => {
     const u = unitsById.get(String(id)) || {};
     const jm = jobMetaOf(u, showId);
+    /* Merged one-field label, same rule as index.html jobLabel() — raw
+     * job_name/placement columns stay for archival fidelity, job_label is
+     * what the app actually displays. */
+    const mergedLabel = (m) => { const n = String(m.name || '').trim(), a = String(m.area || '').trim();
+      if (n && a) { const nl = n.toLowerCase(), al = a.toLowerCase(); return nl.includes(al) ? n : (al.includes(nl) ? a : (n + ' — ' + a)); }
+      return n || a; };
     let first = null, last = null;
     for (const m of movements) if (m.unit_id === id && m.ts) { const t = Date.parse(m.ts); if (first === null || t < first) first = t; if (last === null || t > last) last = t; }
     for (const r of checks) if (r.unit_id === id && r.ts && !r.voided_at) { const t = Date.parse(r.ts); if (first === null || t < first) first = t; if (last === null || t > last) last = t; }
     return [u.serial || '', u.tag_id || '', u.klass || '', u.make || '', u.model || '', u.kw != null ? u.kw : '',
       isTwin(u) ? 'yes' : '', u.has_def === true ? 'yes' : '', u.engines ? JSON.stringify(u.engines) : '',
-      jm.name || '', jm.area || '', jm.note || '',
+      jm.name || '', jm.area || '', jm.note || '', mergedLabel(jm),
       [...e.sources].join('; '), e.movement_confirmed ? 'yes' : 'NO — weak evidence only (see dictionary)',
       iso(first) || '', iso(last) || '',
       locName(u.location_type, u.location_id, showsById, shopsById), id];
   }).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
   fs.writeFileSync(path.join(dir, 'data', 'csv', 'roster.csv'), toCsv(
-    ['serial', 'tag_id', 'class', 'make', 'model', 'kva_rating', 'twinpak', 'has_def', 'engines_json', 'job_name', 'placement', 'job_note',
+    ['serial', 'tag_id', 'class', 'make', 'model', 'kva_rating', 'twinpak', 'has_def', 'engines_json', 'job_name', 'placement', 'job_note', 'job_label',
       'roster_evidence', 'movement_confirmed', 'first_seen_utc', 'last_seen_utc', 'location_at_archive_time', 'unit_id'], rosterRows));
 
   fs.writeFileSync(path.join(dir, 'data', 'csv', 'checks.csv'), toCsv(
@@ -751,6 +757,10 @@ pins are the last logged movement, not surveyed positions.
 - **\`job_meta\`** on a unit is a map keyed by show id: \`{name, area, note}\` —
   what the unit powered and where it sat on THAT job only. The roster.csv
   \`job_name\`/\`placement\`/\`job_note\` columns come from this show's key.
+  Since 2026-09-21 the app has ONE label field stored in \`area\`; \`name\` is
+  legacy (read-only, merged into display, dropped on next edit). The
+  \`job_label\` column is the merged label exactly as the app displays it;
+  \`job_name\`/\`placement\` remain the raw stored fields.
 - **Serials are free text** (slashes, dashes, trailing periods are real).
   \`photos/\` directory names are sanitized serials; the true serial is in
   \`photos/index.csv\` and roster.csv.
