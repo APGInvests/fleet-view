@@ -6,7 +6,9 @@
  * different next actions, and the zero state names its action with a real
  * button (the Jobs-list pattern). The add sheet is serial-first: typing is the
  * proven field path (Bourbon 25/11min, every dup incident a typo); the camera
- * is collapsed until asked for and session-sticky once opened. Day N parses
+ * entry point is OFF the sheet entirely since add-sheet-trim (zero production
+ * scans ever), with the scanner code parked dormant for the QR-label plan.
+ * Day N parses
  * start_date as a LOCAL calendar date — date-only strings parse as UTC
  * midnight, which is yesterday west of UTC, so a job starting today read
  * "Day 2" in Pacific. RUN THIS SUITE WITH TZ=America/Los_Angeles — the Day N
@@ -98,8 +100,12 @@ module.exports = async (app, t) => {
     app.live.fleetFilter = 'all';
   }
 
-  t.group('add sheet: serial-first, camera collapsed until asked, session-sticky');
+  t.group('add sheet: serial-only — camera OFF the sheet, scanner code parked dormant (2026-09-21, add-sheet-trim)');
   {
+    /* Supersedes the collapsed-camera contract (add-flow-clarity): zero scans
+       were ever recorded in production, so the entry point comes off the sheet
+       entirely. The scanner CODE stays — the parked QR-label plan revives it —
+       so these pins assert dormant-but-present, never deleted. */
     app.setState({ units: [], shows: [{ id: 'show-A', name: 'Desert Sound' }] });
     app.live.TAB = 'jobs'; app.live.S.currentShowId = 'show-A';
     const sheetHtml = () => app.document.querySelector('#sheet').innerHTML;
@@ -108,21 +114,18 @@ module.exports = async (app, t) => {
     const h = sheetHtml();
     t.includes(h, 'Type the serial', 'intro leads with the real path');
     t.excludes(h, 'Scan the sticker', 'the sticker lead is gone — the stickers do not exist in the field');
-    t.ok(h.indexOf('assetSearch') > -1 && h.indexOf('id="reader"') > -1 && h.indexOf('assetSearch') < h.indexOf('id="reader"'),
-      'serial field renders ABOVE the camera');
-    t.includes(h, 'id="camWrap" style="display:none"', 'camera collapsed by default — no viewport, no permission prompt');
-    t.includes(h, 'Scan a barcode instead', 'camera reachable behind one honest button');
+    t.excludes(h, 'Scan a barcode instead', 'the barcode entry point is gone from the sheet');
+    t.excludes(h, 'id="camWrap"', 'no camera container renders');
+    t.excludes(h, 'id="reader"', 'no scanner viewport renders');
+    t.excludes(h, 'scanCamBtn', 'no camera button renders');
     t.includes(h, 'scanHrsTgl', 'hours toggle still on the sheet (contract)');
     ['autocapitalize="characters"', 'autocorrect="off"', 'spellcheck="false"', 'autocomplete="off"'].forEach((a) =>
       t.includes(h, a, 'serial input keeps ' + a + ' — keyboards caused the dup typos'));
 
-    app.fn.scanCamT();
-    t.eq(app.document.querySelector('#camWrap').style.display, '', 'expand reveals the camera');
-    app.fn.openScan();
-    t.includes(sheetHtml(), 'id="camWrap" style=""', 'camera stays open across the batch-loop re-arm (session-sticky)');
-
+    t.eq(typeof app.fn.startScanner, 'function', 'scanner code kept dormant — the parked QR-label plan revives it');
+    t.eq(typeof app.fn.scanCamT, 'function', 'camera-open path kept dormant too');
     const src = String(app.fn.startScanner);
-    t.includes(src, 'Type the serial above', 'camera-failure copy points at a control that exists');
-    t.excludes(src, 'Add manually', 'the phantom "Add manually" button reference is gone');
+    t.includes(src, 'Type the serial above', 'camera-failure copy still points at a control that exists');
+    t.excludes(src, 'Add manually', 'the phantom "Add manually" button reference stays gone');
   }
 };

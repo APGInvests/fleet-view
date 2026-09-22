@@ -65,17 +65,26 @@ module.exports = async (app, t) => {
     t.eq(btn().style.display, 'none', 'cleared field hides it again');
   }
 
-  t.group('add sheet: hours toggle is an optional question');
+  t.group('add sheet: hours question is ONE card with a real switch (2026-09-21, add-sheet-trim)');
   {
     app.fn.openScan();
     const h = sheetHtml();
+    t.includes(h, '<div class="card" id="hrsCard"', 'the hours question lives in a card');
+    const hi = h.indexOf('<div class="card" id="hrsCard"');
+    const oi = h.indexOf('Optional — the unit is received either way. Skip anytime.');
+    t.ok(hi > -1 && oi > hi, 'the receipt-first line renders after the card opens');
+    t.excludes(h.slice(hi + 30, oi), '<div class="card"', 'and INSIDE that same card — no second card between question and rule');
     t.includes(h, '⏱ Log hours too?', 'OFF label asks, never instructs');
-    t.includes(h, 'Optional — the unit is received either way. Skip anytime.', 'the receipt-first rule is stated in the UI');
-    t.includes(h, 'scanHrsTgl', 'contract id intact');
+    t.includes(h, 'id="scanHrsTgl"', 'contract id intact');
+    t.includes(h, 'role="switch"', 'the control is a real switch, not a color-shifting button');
+    t.includes(h, 'aria-checked="false"', 'and reads OFF');
     app.fn.scanAskHoursT();
     t.eq(!!app.live.scanAskHours, true, 'toggle flips on');
-    t.includes(app.document.querySelector('#scanHrsTgl').textContent, 'Logging hours after each unit · ON', 'ON label patched in place');
-    t.includes(sheetHtml(), '⏱ Log hours too?', 'sheet was NOT rebuilt (markup string untouched — typed state would survive)');
+    const sw = app.document.querySelector('#scanHrsTgl');
+    t.ok(sw.classList.contains('on'), 'switch patched to ON in place'); /* classList, not className — the harness fake doesn't sync the string */
+    t.eq(sw.getAttribute('aria-checked'), 'true', 'aria state follows');
+    t.includes(app.document.querySelector('#scanHrsLb').textContent, 'Logging hours after each unit', 'label states the mode when ON');
+    t.includes(sheetHtml(), 'aria-checked="false"', 'sheet was NOT rebuilt (markup string untouched — typed state would survive)');
     app.fn.scanAskHoursT();
   }
 
@@ -89,7 +98,8 @@ module.exports = async (app, t) => {
     t.eq(smap()['show-AS-A'], 1, 'toggling ON on Alpha persists under Alpha\'s id');
     app.fn.openScan();
     t.eq(!!app.live.scanAskHours, true, 'reopening the sheet on Alpha remembers ON');
-    t.includes(sheetHtml(), 'Logging hours after each unit · ON', 'and renders ON');
+    t.includes(sheetHtml(), 'Logging hours after each unit', 'and renders ON');
+    t.includes(sheetHtml(), 'aria-checked="true"', 'switch renders ON too');
     app.S.currentShowId = 'show-AS-B';
     app.fn.openScan();
     t.eq(!!app.live.scanAskHours, false, 'Bravo, never set: OFF — the choice never leaks across jobs');

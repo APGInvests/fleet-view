@@ -59,4 +59,28 @@ module.exports = async (app, t) => {
   const iu = app.supabaseCalls.filter((c) => c.table === 'issues' && c.op === 'upsert');
   t.ok(iu.length === 1, 'issue row upserted after swap');
   t.excludes(JSON.stringify(iu[0] ? iu[0].payload : ''), 'data:image', 'issue photos also persist as URLs');
+
+  t.group('asset photos: Info tab is the home, empty state nudges (2026-09-21, add-sheet-trim)');
+  {
+    /* Two photo kinds, two homes: placement photos live on the job (movement
+       kind:'photo'); ASSET photos — size, chassis, forklift pockets, condition —
+       live on the unit, shown on the Info tab. The nudge is Info-tab-only and
+       muted: photos stay optional (§8 rule 6), and the receipt loop is sacred —
+       the add sheet never mentions photos at all. */
+    const bare = { id: 'u-ph-1', serial: 'NUDGE1', tagId: '', klass: 'small', make: 'MQ', model: 'DCA25',
+      kw: 25, photos: [], jobMeta: {}, opStatus: 'staged', locationType: 'fleet', locationId: null };
+    let h = app.fn.paneInfo(bare, 'Unassigned');
+    t.includes(h, 'No photos of this asset yet', 'empty state says why the strip is blank');
+    t.includes(h, 'forklift pockets', 'and names what a useful shot shows');
+    t.includes(h, 'Add photo', 'the add button stays right there');
+    const withPhoto = Object.assign({}, bare, { id: 'u-ph-2', photos: ['https://x/unit-photos/units/a/1-p.jpg'] });
+    h = app.fn.paneInfo(withPhoto, 'Unassigned');
+    t.excludes(h, 'No photos of this asset yet', 'a unit with photos never sees the nudge');
+
+    app.setState({ units: [], shows: [{ id: 'show-PH-A', name: 'Nudge Fest' }], movements: [], reports: [] });
+    app.live.TAB = 'jobs'; app.S.currentShowId = 'show-PH-A';
+    app.fn.openScan();
+    const sh = app.document.querySelector('#sheet').innerHTML.toLowerCase();
+    t.excludes(sh, 'photo', 'the add sheet never asks for a photo — receipt loop stays friction-free');
+  }
 };
