@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-09-22 twin-size-kw -->
+<!-- fleetview build 2026-09-22 svc-runway -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -973,6 +973,47 @@ function specBlock(u){if(!u||u.klass!=='big')return '';
 function jobLabel(u,sid){const m=jm(u,sid);const n=String(m.name||'').trim(),a=String(m.area||u.area||'').trim();
   if(n&&a){const nl=n.toLowerCase(),al=a.toLowerCase();return nl.includes(al)?n:(al.includes(nl)?a:(n+' — '+a));}
   return n||a;}
+/* ===== HOURS-TO-SERVICE RUNWAY (2026-09-22) =====
+   The PM placement question at unload: which units have the most hours left
+   before service. Renders ONLY when provable: a service-due target exists AND
+   an hours reading was logged AFTER the unit's latest real arrival on THIS
+   show (toType 'show', kind null, from ≠ to — pin-sets and photo events are
+   never arrivals; the new-asset birth row, fromType null, is). No reading, a
+   pre-arrival reading, or no target = nothing — never invent an interval,
+   never carry old hours; units.currentHours has no timestamp and is never
+   read here. Crews don't check units back out and jobs sit open for months,
+   so the reading's AGE is the judgment surface; the arrival floor only proves
+   "observed on this job". Hours-to-service can only shrink between readings —
+   an old reading OVERSTATES runway, and an old OVERDUE is certain — so past
+   14 days the wording drops the live claim ("to service") for a dated fact
+   ("as of") but the number is never hidden, and overdue stays red at any age.
+   Twins: lower-of-two, engine named; lanes via engReports (A inherits
+   untagged, B never does); flat serviceDueHours on a twin is ignored (§4). */
+function arrivalTs(u){const sid=unitShowId(u);if(!sid)return null;let t=null;
+  S.movements.forEach(m=>{if(m.unitId===u.id&&m.toType==='show'&&m.toId===sid&&m.kind==null
+    &&(m.fromType!==m.toType||m.fromId!==m.toId)&&(t==null||m.timestamp>t))t=m.timestamp;});
+  return t;}
+function freshRead(u,e,arr){if(arr==null)return null;
+  return (e?engReports(u,e):reportsFor(u.id)).find(r=>r.engineHours!=null&&r.timestamp>arr)||null;}
+function svcRunway(u){const arr=arrivalTs(u);if(arr==null)return null;
+  if(!isTwin(u)){if(u.serviceDueHours==null)return null;
+    const r=freshRead(u,null,arr);if(!r)return null;
+    return{eng:null,remaining:Math.round((u.serviceDueHours-r.engineHours)*10)/10,readTs:r.timestamp,state:svcCalc(u.serviceDueHours,r.engineHours).state};}
+  let best=null;
+  ENG.forEach(e=>{const due=engMeta(u,e).serviceDueHours;if(due==null)return;
+    const r=freshRead(u,e,arr);if(!r)return;
+    const rem=Math.round((due-r.engineHours)*10)/10;
+    if(!best||rem<best.remaining)best={eng:e,remaining:rem,readTs:r.timestamp,state:svcCalc(due,r.engineHours).state};});
+  return best;}
+const RUNWAY_STALE_MS=14*24*3600e3;
+function runwayChip(u){const rw=svcRunway(u);if(!rw)return '';
+  const cls=rw.state==='over'?'chip bad':(rw.state==='soon'?'chip warn':'chip');
+  const age=fmtAgo(rw.readTs);const old=(now()-rw.readTs)>RUNWAY_STALE_MS;
+  const who=rw.eng?(engName(u,rw.eng)+' '):'';
+  const txt=rw.remaining<=0
+    ?('OVER '+Math.abs(rw.remaining)+' h'+(old?(' as of '+age):(' · '+age)))
+    :(old?(rw.remaining+' h as of '+age):(rw.remaining+' h to service · '+age));
+  return '<span class="'+cls+'">🔧 '+esc(who+txt)+'</span>';}
 function unitCard(u,sid){
   const cs=computeStatus(u);const oi=openIssuesFor(u.id);
   /* Size-locked title (2026-09-21): every variant — healthy, down, transit —
@@ -990,7 +1031,7 @@ function unitCard(u,sid){
     <div class="l1"><span class="tag">${esc(title)}</span>${statusPill(cs)}</div>
     <div style="font-size:12px;color:var(--ink2);margin-top:1px">${esc(subtitle||'—')}</div>
     ${line2}${fuelBar(u)}
-    <div class="metaline">${isTwin(u)?('<span class="chip">TWINPAK'+(engStyle(u)?(' · '+(engStyle(u)==='12'?'1/2':'A/B')):'')+'</span>'):''}${twinGaps(u).map(e=>'<span class="chip warn">'+esc(engName(u,e))+' needs a meter reading</span>').join('')}${gaugeBadge(u)}${np?'<span class="chip">📷 '+np+'</span>':''}<span class="fresh ${stale?'stale':''}">${stale?IC.warn:''}⏱ ${fmtAgo(lastCheckTs(u))}${lastReport(u.id)?(' · '+esc(lastReport(u.id).techName||'')):''}</span></div>
+    <div class="metaline">${runwayChip(u)}${isTwin(u)?('<span class="chip">TWINPAK'+(engStyle(u)?(' · '+(engStyle(u)==='12'?'1/2':'A/B')):'')+'</span>'):''}${twinGaps(u).map(e=>'<span class="chip warn">'+esc(engName(u,e))+' needs a meter reading</span>').join('')}${gaugeBadge(u)}${np?'<span class="chip">📷 '+np+'</span>':''}<span class="fresh ${stale?'stale':''}">${stale?IC.warn:''}⏱ ${fmtAgo(lastCheckTs(u))}${lastReport(u.id)?(' · '+esc(lastReport(u.id).techName||'')):''}</span></div>
   </div></div></div>`;
 }
 /* ===== SWIPE-TO-REVEAL (job asset cards) ===== */
@@ -1805,7 +1846,6 @@ function saveShow(id){const nm=$('#sh_name').value.trim();if(!nm){toast('Name re
 function openMore(){sheet('More',`<button class="btn ghost block" style="margin-bottom:9px" onclick="openTestQR()">Make a test QR code</button><button class="btn ghost block" onclick="openSettings()">Settings</button>`);}
 function openShops(){const rows=S.shops.map(sh=>{const us=S.units.filter(u=>u.locationType==='shop'&&u.locationId===sh.id);return `<div class="listitem"><div class="between"><b>${esc(sh.name)}</b><span class="chip">${us.length} on hand</span></div>${us.length?`<div class="muted" style="font-size:12px;margin-top:5px">${us.map(u=>'#'+esc(u.serial||u.tagId)).join(', ')}</div>`:''}</div>`;}).join('');sheet('Shops',`<p class="muted" style="margin-top:0">A unit's location is wherever it was last scanned.</p><div class="card">${rows}</div><button class="btn ghost block" style="margin-top:12px" onclick="addShop()">+ Add shop</button>`);}
 function addShop(){const n=prompt('Shop name');if(n&&n.trim()){S.shops.push({id:uid('shop'),name:n.trim()});save();openShops();}}
-function openServicePlanner(){const list=S.units.filter(u=>serviceState(u).state!=='unknown').sort((a,b)=>serviceState(a).remaining-serviceState(b).remaining);sheet('Service planner',`<p class="muted" style="margin-top:0">Units by runtime left before service. Put fresh units on long runs, near-service units on short runs.</p><div class="card" style="padding:4px 0">${list.length?list.map(u=>{const sv=serviceState(u);const cls=sv.state==='over'?'bad':(sv.state==='soon'?'warn':'ok');return `<div class="listitem" style="cursor:pointer;display:flex;align-items:center;gap:10px" onclick="openUnit('${u.id}')"><div style="flex:1;min-width:0"><b>#${esc(u.serial||u.tagId)}</b> <span class="muted" style="font-size:12px">${esc([u.make,u.model].filter(Boolean).join(' '))}</span><div class="muted" style="font-size:11px">${u.currentHours??'?'}h now · at ${whereIs(u)}</div></div><span class="chip ${cls}">${sv.remaining<=0?('OVER '+Math.abs(sv.remaining)+'h'):(sv.remaining+'h')}</span></div>`;}).join(''):'<div class="empty"><p class="muted">No service info yet.</p></div>'}</div>`);}
 function openTestQR(){sheet('Make a test QR code',`<p class="muted" style="margin-top:0">Type any code, show this on another screen, and scan it to try the flow.</p><label class="fld"><span class="lb">Code text</span><div class="row"><input id="qrText" value="GEN-TEST-01"/><button class="btn dark" onclick="genQR()">Make</button></div></label><div class="qrbox"><div id="qrOut"></div></div>`);setTimeout(genQR,150);}
 function genQR(){const el=$('#qrOut');if(!el)return;el.innerHTML='';if(typeof QRCode==='undefined'){el.textContent='QR lib not loaded';return;}new QRCode(el,{text:($('#qrText').value||'GEN-TEST-01'),width:200,height:200});}
 function openSettings(){sheet('Settings',`<label class="fld"><span class="lb">Your name</span><input id="set_tech" value="${esc(S.settings.techName||'')}"/></label><div class="grid2"><label class="fld"><span class="lb">Service warn (hrs)</span><input id="set_warn" type="number" inputmode="decimal" value="${S.settings.warnHours||20}"/></label><label class="fld"><span class="lb">Stale check (hrs)</span><input id="set_stale" type="number" inputmode="decimal" value="${S.settings.staleHours||6}"/></label></div><label class="fld"><span class="lb">Service dept email</span><input id="set_email" value="${esc(S.settings.svcEmail||'')}"/></label><label class="fld"><span class="lb">Home screen</span><div class="segwrap" id="home_seg"><button type="button" data-v="jobs" class="${S.settings.homeTab!=='fleet'?'on':''}" style="${S.settings.homeTab!=='fleet'?'background:var(--accent);color:#fff':''}" onclick="homeSeg(this)">Jobs</button><button type="button" data-v="fleet" class="${S.settings.homeTab==='fleet'?'on':''}" style="${S.settings.homeTab==='fleet'?'background:var(--accent);color:#fff':''}" onclick="homeSeg(this)">Fleet</button></div></label><label class="fld"><span class="lb">Jobs icon</span><select id="set_icon">${[['jobs','Calendar'],['pin','Location flag'],['map','Map'],['bolt','Bolt'],['fleet','Grid']].map(([v,l])=>`<option value="${v}" ${S.settings.jobIcon===v?'selected':''}>${l}</option>`).join('')}</select></label><button class="btn primary block" onclick="saveSettings()">Save</button><hr class="sep"/><div class="lb" style="margin-bottom:6px">ACCOUNT</div><p class="muted" style="font-size:12px;margin-top:0">Signed in as <b>${esc((USER&&USER.email)||'—')}</b>. Your fleet data is shared live with your team.</p><div class="row"><button class="btn dark wide" onclick="exportData()">Export backup</button><button class="btn ghost wide" onclick="doSignOut()">Sign out</button></div>${S.shows.some(s=>(s.name||'').startsWith('DEMO'))?'<hr class="sep"/><div class="lb" style="margin-bottom:6px">Leftover demo data</div><p class="muted" style="font-size:12px;margin-top:0">Test units from the demo are still in the shared fleet.</p><button class="btn ghost block" onclick="removeSampleData()">Remove demo data</button>':''}<p class="muted" style="font-size:11px;margin-top:14px">FleetView · Team mode · live shared data.</p>`,stopScanner);homeSegVal=S.settings.homeTab||'jobs';}
