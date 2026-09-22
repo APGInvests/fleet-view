@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-09-22 svc-runway -->
+<!-- fleetview build 2026-09-22 job-closeout -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -765,15 +765,23 @@ function lastCheckTs(u){const r=lastReport(u.id);return r?r.timestamp:null;}
    needs to see — that's the point of the app. Service won't flood, because a unit
    with blank hours has no countdown at all. */
 function onJob(u){return !!u&&u.locationType==='show';}
+/* Closed-out show (2026-09-22): shows.archived_at, set only from Settings.
+   Gates stale + lowFuel ONLY — a closed show's units owe nobody a check and
+   their fuel isn't news, but down/service are machine facts and stay global.
+   A show id that no longer resolves (deleted show) reads OPEN, so its units
+   keep alerting rather than silently vanishing — bias to flagging. */
+function showClosed(sid){const s=showById(sid);return !!(s&&s.archivedAt);}
 function owesCheck(u,e){
   if(!onJob(u))return false;
+  if(showClosed(u.locationId))return false;
   const st=e?engStatus(u,e):((u&&u.opStatus)||'staged');
   if(st!=='running')return false;
   const t=e?engLastTs(u,e):lastCheckTs(u);
   const h=(S.settings.staleHours||6)*3600e3;
   return !t||(now()-t)>h;}
 function isStale(u){if(isTwin(u))return ENG.some(e=>owesCheck(u,e));return owesCheck(u,null);}
-function lowFuel(u){const f=latestFuel(u);return f!=null&&f<20&&chassisStatus(u)==='running';}
+function lowFuel(u){if(u&&u.locationType==='show'&&showClosed(u.locationId))return false;
+  const f=latestFuel(u);return f!=null&&f<20&&chassisStatus(u)==='running';}
 function isHardDown(u){return computeStatus(u).color==='red';}
 function needsService(u){const s=serviceState(u).state;return s==='over'||s==='soon';}
 /* kind:'photo' rows are excluded EXPLICITLY here and in recentDests, even though
@@ -1068,17 +1076,28 @@ function toggleFav(id){let f=getFavs();f=f.includes(id)?f.filter(x=>x!==id):f.co
 let jobsSearch='';
 function rerenderJobs(){const v=$('#view');const sc=v.querySelector('.searchbar input');const pos=sc?sc.selectionStart:null;v.innerHTML=renderJobsList();const ni=v.querySelector('.searchbar input');if(ni){ni.focus();if(pos!=null)try{ni.setSelectionRange(pos,pos);}catch(e){}}}
 function showJobOnMap(showId){const s=showById(showId);if(!s)return;S.currentShowId=showId;mapScope='job';mapFocusUnit=null;const ov=$('#overlay');if(ov)ov.classList.remove('on');go('map');}
+/* Closed group state: session-only, boots collapsed. A live search auto-expands
+   the group — a match hidden behind a collapsed header is a lie about the data. */
+let closedOpen=false;
+function closedToggle(){closedOpen=!closedOpen;render();}
 function renderJobsList(){
   const favs=getFavs();
-  let list=S.shows.slice().sort((a,b)=>(favs.includes(b.id)?1:0)-(favs.includes(a.id)?1:0));
-  if(jobsSearch){const q=jobsSearch.toLowerCase();list=list.filter(s=>[s.name,s.location,s.cesJobNumber].some(x=>String(x||'').toLowerCase().includes(q)));}
-  const rows=list.map(s=>{const h=jobHealth(s);const d=dayOfShow(s);const fav=favs.includes(s.id);const dl=jobDatesLine(s);
+  const q=jobsSearch?jobsSearch.toLowerCase():'';
+  const match=s=>!q||[s.name,s.location,s.cesJobNumber].some(x=>String(x||'').toLowerCase().includes(q));
+  const rowFor=s=>{const h=jobHealth(s);const d=dayOfShow(s);const fav=favs.includes(s.id);const dl=jobDatesLine(s);
     return `<div class="swipe-wrap"><div class="swipe-maphint">🗺 Map</div><div class="swipe-actions"><button class="swipe-act del" onclick="event.stopPropagation();closeSwipe(this);confirmDeleteJob('${s.id}')">Delete</button></div><div class="card jobrow swipe-card" onpointerdown="swStart(event,this)" onpointermove="swMove(event,this)" onpointerup="jbEnd(event,this,'${s.id}')" onpointercancel="swCancel(this)"><div class="between"><div><div class="jt">${esc(s.name)}${s.cesJobNumber?`<span class="jnum">#${esc(s.cesJobNumber)}</span>`:''}</div><div class="jsub">${esc(s.location||'')}${d?(' · Day '+d):''}${phaseOf(s)?(' · '+phaseOf(s)):''}</div>${dl?`<div class="jdates">${esc(dl)}</div>`:''}</div><button class="favstar" style="color:${fav?'var(--accent)':'var(--ink2)'}" onclick="event.stopPropagation();toggleFav('${s.id}')">${fav?'★':'☆'}</button></div>
-      <div class="hbar"><span class="hchip">${h.units} units</span>${h.down?`<span class="hchip alarm"><span class="dot" style="background:var(--red)"></span>${h.down} down</span>`:''}${h.overdue?`<span class="hchip warnh">⏱ ${h.overdue} overdue</span>`:''}${!h.down&&!h.overdue&&h.units?`<span class="hchip" style="color:var(--green)"><span class="dot" style="background:var(--green)"></span>all good</span>`:''}<span class="hchip">${h.last?('active '+fmtAgo(h.last)):'no activity'}</span></div></div></div>`;}).join('');
+      <div class="hbar"><span class="hchip">${h.units} units</span>${h.down?`<span class="hchip alarm"><span class="dot" style="background:var(--red)"></span>${h.down} down</span>`:''}${h.overdue?`<span class="hchip warnh">⏱ ${h.overdue} overdue</span>`:''}${!h.down&&!h.overdue&&h.units?`<span class="hchip" style="color:var(--green)"><span class="dot" style="background:var(--green)"></span>all good</span>`:''}<span class="hchip">${h.last?('active '+fmtAgo(h.last)):'no activity'}</span></div></div></div>`;};
+  let list=S.shows.filter(s=>!s.archivedAt).sort((a,b)=>(favs.includes(b.id)?1:0)-(favs.includes(a.id)?1:0));
+  if(q)list=list.filter(match);
+  const closed=S.shows.filter(s=>s.archivedAt&&match(s)).sort((a,b)=>(b.archivedAt||0)-(a.archivedAt||0));
+  const rows=list.map(rowFor).join('');
+  const expand=closedOpen||!!q;
+  const closedSec=closed.length?`<button class="btn ghost block" style="margin-top:14px" onclick="closedToggle()">${expand?'▾':'▸'} Closed (${closed.length})</button>${expand?closed.map(rowFor).join(''):''}`:'';
+  const openArea=list.length?rows:(q?(closed.length?'':`<div class="empty" style="padding:26px"><p class="muted">No jobs match “${esc(jobsSearch)}”.</p></div>`):(S.shows.length?`<div class="empty" style="padding:26px"><p class="muted">No open jobs.</p></div>`:''));
   return `<div class="between"><h2 class="section" style="margin:0">Jobs</h2><button class="btn primary sm" onclick="editShow()">+ New</button></div>
     <p class="muted" style="margin:6px 0 12px;font-size:13px">Tap a job to see its fleet. Star a job to pin it to the top.</p>
     ${S.shows.length?`<div class="searchbar">${IC.search}<input placeholder="Search jobs…" value="${esc(jobsSearch)}" autocapitalize="off" autocorrect="off" oninput="jobsSearch=this.value;rerenderJobs()"/></div>`:''}
-    ${S.shows.length?(list.length?rows:`<div class="empty" style="padding:26px"><p class="muted">No jobs match “${esc(jobsSearch)}”.</p></div>`):(NET_DOWN?`<div class="empty"><div class="em">📡</div><p class="muted">No signal, and no saved copy on this phone yet. Jobs appear automatically once this phone opens the app with service — and anything logged meanwhile is kept and synced then.</p></div>`:`<div class="empty"><div class="em">📋</div><p class="muted">No jobs yet. Create your first show.</p><button class="btn primary block" style="margin-top:12px" onclick="editShow()">+ Create a job</button></div>`)}`;
+    ${S.shows.length?(openArea+closedSec):(NET_DOWN?`<div class="empty"><div class="em">📡</div><p class="muted">No signal, and no saved copy on this phone yet. Jobs appear automatically once this phone opens the app with service — and anything logged meanwhile is kept and synced then.</p></div>`:`<div class="empty"><div class="em">📋</div><p class="muted">No jobs yet. Create your first show.</p><button class="btn primary block" style="margin-top:12px" onclick="editShow()">+ Create a job</button></div>`)}`;
 }
 let jobFilter='all',jobSearch='';
 function setJobFilter(f){jobFilter=f;render();}
@@ -1092,7 +1111,7 @@ function renderJobDetail(id){const s=showById(id);if(!s){jobView=null;return ren
   list=sortUnits(list.filter(u=>passFilter(u,jobFilter)));
   return `<button class="backbtn" onclick="go('jobs')">${IC.back} All jobs</button>
     <div class="between"><h2 class="section" style="margin:0">${esc(s.name)}${s.cesJobNumber?`<span class="jnum">#${esc(s.cesJobNumber)}</span>`:''}</h2><button class="btn ghost sm" onclick="editShow('${id}')">Edit</button></div>
-    <div class="hbar" style="margin:6px 0 12px"><span class="hchip">${esc(s.location||'')}${d?(' · Day '+d):''}${phaseOf(s)?(' · '+phaseOf(s)):''}</span>${jobDatesLine(s)?`<span class="hchip">${esc(jobDatesLine(s))}</span>`:''}${h.down?`<span class="hchip alarm">${h.down} down</span>`:''}${h.overdue?`<span class="hchip warnh">${h.overdue} overdue</span>`:''}</div>
+    <div class="hbar" style="margin:6px 0 12px">${s.archivedAt?'<span class="hchip">Closed</span>':''}<span class="hchip">${esc(s.location||'')}${d?(' · Day '+d):''}${phaseOf(s)?(' · '+phaseOf(s)):''}</span>${jobDatesLine(s)?`<span class="hchip">${esc(jobDatesLine(s))}</span>`:''}${h.down?`<span class="hchip alarm">${h.down} down</span>`:''}${h.overdue?`<span class="hchip warnh">${h.overdue} overdue</span>`:''}</div>
     <div class="row" style="margin-bottom:12px"><button class="btn ghost wide sm" onclick="openJobMap('${id}')">${IC.map} Map</button><button class="btn ghost wide sm" onclick="openJobLog('${id}')">${IC.log} Log</button><button class="btn dark wide sm" onclick="openReport('${id}')">${IC.report} Report</button></div>
     ${total?`<div class="searchbar">${IC.search}<input placeholder="Search this job…" value="${esc(jobSearch)}" oninput="jobSearch=this.value;rerenderJob('${id}')"/></div>
     ${filterBar(jobFilter,'setJobFilter')}`:''}${list.length?'<p class="muted" style="font-size:11px;margin:2px 0 8px">Swipe a unit left to send it off the job or delete it.</p>':''}
@@ -1848,9 +1867,38 @@ function openShops(){const rows=S.shops.map(sh=>{const us=S.units.filter(u=>u.lo
 function addShop(){const n=prompt('Shop name');if(n&&n.trim()){S.shops.push({id:uid('shop'),name:n.trim()});save();openShops();}}
 function openTestQR(){sheet('Make a test QR code',`<p class="muted" style="margin-top:0">Type any code, show this on another screen, and scan it to try the flow.</p><label class="fld"><span class="lb">Code text</span><div class="row"><input id="qrText" value="GEN-TEST-01"/><button class="btn dark" onclick="genQR()">Make</button></div></label><div class="qrbox"><div id="qrOut"></div></div>`);setTimeout(genQR,150);}
 function genQR(){const el=$('#qrOut');if(!el)return;el.innerHTML='';if(typeof QRCode==='undefined'){el.textContent='QR lib not loaded';return;}new QRCode(el,{text:($('#qrText').value||'GEN-TEST-01'),width:200,height:200});}
-function openSettings(){sheet('Settings',`<label class="fld"><span class="lb">Your name</span><input id="set_tech" value="${esc(S.settings.techName||'')}"/></label><div class="grid2"><label class="fld"><span class="lb">Service warn (hrs)</span><input id="set_warn" type="number" inputmode="decimal" value="${S.settings.warnHours||20}"/></label><label class="fld"><span class="lb">Stale check (hrs)</span><input id="set_stale" type="number" inputmode="decimal" value="${S.settings.staleHours||6}"/></label></div><label class="fld"><span class="lb">Service dept email</span><input id="set_email" value="${esc(S.settings.svcEmail||'')}"/></label><label class="fld"><span class="lb">Home screen</span><div class="segwrap" id="home_seg"><button type="button" data-v="jobs" class="${S.settings.homeTab!=='fleet'?'on':''}" style="${S.settings.homeTab!=='fleet'?'background:var(--accent);color:#fff':''}" onclick="homeSeg(this)">Jobs</button><button type="button" data-v="fleet" class="${S.settings.homeTab==='fleet'?'on':''}" style="${S.settings.homeTab==='fleet'?'background:var(--accent);color:#fff':''}" onclick="homeSeg(this)">Fleet</button></div></label><label class="fld"><span class="lb">Jobs icon</span><select id="set_icon">${[['jobs','Calendar'],['pin','Location flag'],['map','Map'],['bolt','Bolt'],['fleet','Grid']].map(([v,l])=>`<option value="${v}" ${S.settings.jobIcon===v?'selected':''}>${l}</option>`).join('')}</select></label><button class="btn primary block" onclick="saveSettings()">Save</button><hr class="sep"/><div class="lb" style="margin-bottom:6px">ACCOUNT</div><p class="muted" style="font-size:12px;margin-top:0">Signed in as <b>${esc((USER&&USER.email)||'—')}</b>. Your fleet data is shared live with your team.</p><div class="row"><button class="btn dark wide" onclick="exportData()">Export backup</button><button class="btn ghost wide" onclick="doSignOut()">Sign out</button></div>${S.shows.some(s=>(s.name||'').startsWith('DEMO'))?'<hr class="sep"/><div class="lb" style="margin-bottom:6px">Leftover demo data</div><p class="muted" style="font-size:12px;margin-top:0">Test units from the demo are still in the shared fleet.</p><button class="btn ghost block" onclick="removeSampleData()">Remove demo data</button>':''}<p class="muted" style="font-size:11px;margin-top:14px">FleetView · Team mode · live shared data.</p>`,stopScanner);homeSegVal=S.settings.homeTab||'jobs';}
+function openSettings(){sheet('Settings',`<label class="fld"><span class="lb">Your name</span><input id="set_tech" value="${esc(S.settings.techName||'')}"/></label><div class="grid2"><label class="fld"><span class="lb">Service warn (hrs)</span><input id="set_warn" type="number" inputmode="decimal" value="${S.settings.warnHours||20}"/></label><label class="fld"><span class="lb">Stale check (hrs)</span><input id="set_stale" type="number" inputmode="decimal" value="${S.settings.staleHours||6}"/></label></div><label class="fld"><span class="lb">Service dept email</span><input id="set_email" value="${esc(S.settings.svcEmail||'')}"/></label><label class="fld"><span class="lb">Home screen</span><div class="segwrap" id="home_seg"><button type="button" data-v="jobs" class="${S.settings.homeTab!=='fleet'?'on':''}" style="${S.settings.homeTab!=='fleet'?'background:var(--accent);color:#fff':''}" onclick="homeSeg(this)">Jobs</button><button type="button" data-v="fleet" class="${S.settings.homeTab==='fleet'?'on':''}" style="${S.settings.homeTab==='fleet'?'background:var(--accent);color:#fff':''}" onclick="homeSeg(this)">Fleet</button></div></label><label class="fld"><span class="lb">Jobs icon</span><select id="set_icon">${[['jobs','Calendar'],['pin','Location flag'],['map','Map'],['bolt','Bolt'],['fleet','Grid']].map(([v,l])=>`<option value="${v}" ${S.settings.jobIcon===v?'selected':''}>${l}</option>`).join('')}</select></label><button class="btn primary block" onclick="saveSettings()">Save</button>${closeOutSection()}<hr class="sep"/><div class="lb" style="margin-bottom:6px">ACCOUNT</div><p class="muted" style="font-size:12px;margin-top:0">Signed in as <b>${esc((USER&&USER.email)||'—')}</b>. Your fleet data is shared live with your team.</p><div class="row"><button class="btn dark wide" onclick="exportData()">Export backup</button><button class="btn ghost wide" onclick="doSignOut()">Sign out</button></div>${S.shows.some(s=>(s.name||'').startsWith('DEMO'))?'<hr class="sep"/><div class="lb" style="margin-bottom:6px">Leftover demo data</div><p class="muted" style="font-size:12px;margin-top:0">Test units from the demo are still in the shared fleet.</p><button class="btn ghost block" onclick="removeSampleData()">Remove demo data</button>':''}<p class="muted" style="font-size:11px;margin-top:14px">FleetView · Team mode · live shared data.</p>`,stopScanner);homeSegVal=S.settings.homeTab||'jobs';}
 let homeSegVal='jobs';function homeSeg(b){homeSegVal=b.dataset.v;document.querySelectorAll('#home_seg button').forEach(x=>{x.classList.remove('on');x.style.background='';x.style.color='';});b.classList.add('on');b.style.background='var(--accent)';b.style.color='#fff';}
 function saveSettings(){S.settings.techName=$('#set_tech').value.trim();try{sb.auth.updateUser({data:{name:S.settings.techName}});}catch(e){}S.settings.warnHours=num($('#set_warn').value)||20;S.settings.staleHours=num($('#set_stale').value)||6;S.settings.svcEmail=$('#set_email').value.trim();S.settings.homeTab=homeSegVal;S.settings.jobIcon=$('#set_icon').value;save();closeSheet();toast('Saved');render();}
+/* ===== CLOSE OUT A JOB (2026-09-22) =====
+   Reachable ONLY through the Settings gear — job picker, then a typed-name
+   confirm. That placement is accident-prevention (no tech can stumble into it
+   from job detail, cards, or the load-in flow), NOT access control: when
+   roles land (parked Phase A) this needs a real permission check.
+   Closing writes shows.archivedAt and nothing else — it moves no units and
+   edits no rows besides the show. Archived = hidden from the working Jobs
+   list + excluded from stale/fuel alerts (showClosed gate). Everything stays
+   readable: detail, checks, history, log, exports, map. Reopen = null. */
+function closeOutSection(){
+  const open=S.shows.filter(s=>!s.archivedAt).slice().sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+  const closed=S.shows.filter(s=>s.archivedAt).slice().sort((a,b)=>(b.archivedAt||0)-(a.archivedAt||0));
+  if(!open.length&&!closed.length)return '';
+  return `<hr class="sep"/><div class="lb" style="margin-bottom:6px">CLOSE OUT A JOB</div>
+    <p class="muted" style="font-size:12px;margin-top:0">Closing tucks a job into the Closed group and turns off check + fuel nags for its units. Down and service alerts stay on, everything stays readable, and nothing moves.</p>
+    ${open.length?`<label class="fld"><span class="lb">Job to close</span><select id="co_pick">${open.map(s=>`<option value="${s.id}">${esc(s.name)} · ${unitsOnShow(s.id).length} units</option>`).join('')}</select></label>
+    <button class="btn dark block" onclick="closeOutSheet($('#co_pick').value)">Close out…</button>`:''}
+    ${closed.length?`<label class="fld" style="margin-top:10px"><span class="lb">Reopen a closed job</span><select id="ro_pick">${closed.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>
+    <button class="btn ghost block" onclick="doReopen($('#ro_pick').value)">Reopen</button>`:''}`;}
+function closeOutSheet(id){const s=showById(id);if(!s){toast('Pick a job');return;}
+  const n=unitsOnShow(s.id).length;
+  sheet('Close out '+(s.name||''),`<p class="muted" style="margin-top:0">Closing <b>${esc(s.name)}</b>${n?` (${n} unit${n===1?'':'s'} on it)`:''} hides it in the Closed group on the Jobs list and stops check + fuel nags. It <b>moves nothing and edits no units</b> — checks, history and exports stay readable, and down/service alerts stay on. You can reopen it from Settings any time.</p>
+    <label class="fld"><span class="lb">Type the job name to confirm</span><input id="co_name" placeholder="${esc(s.name)}" autocapitalize="off" autocorrect="off" spellcheck="false"/></label>
+    <button class="btn primary block" onclick="doCloseOut('${s.id}')">Close out this job</button>`);}
+function doCloseOut(id){const s=showById(id);if(!s)return;
+  const typed=String(($('#co_name')&&$('#co_name').value)||'').trim().toLowerCase();
+  if(!typed||typed!==String(s.name||'').trim().toLowerCase()){toast('Type the job name exactly to confirm');return;}
+  s.archivedAt=now();save();closeSheet();toast(s.name+' closed out');}
+function doReopen(id){const s=showById(id);if(!s)return;s.archivedAt=null;save();closeSheet();toast(s.name+' reopened');}
 function exportData(){const b=new Blob([JSON.stringify(S,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='fleetview-backup-'+new Date().toISOString().slice(0,10)+'.json';a.click();}
 function importData(inp){const f=inp.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{S=JSON.parse(rd.result);save();closeSheet();go(S.settings.homeTab==='fleet'?'fleet':'jobs');toast('Imported');}catch(e){toast('Invalid file');}};rd.readAsText(f);}
 function wipe(){if(!confirm('Erase everything?'))return;S=blankState();save();closeSheet();go('jobs');}

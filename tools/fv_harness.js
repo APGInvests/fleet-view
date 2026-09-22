@@ -308,7 +308,7 @@ const LIVE_BINDINGS = [
   'SYNC_FAILS', 'SYNC_LOST', 'DEAD',
   'NET_DOWN', 'CACHE_BROKEN', 'CACHE_AGE', 'RETRYABLE',
   'STORAGE_PERSISTED', 'scanAskHours', 'scanCamOpen',
-  'fleetFilter', 'fleetSearch', 'fleetMake',
+  'fleetFilter', 'fleetSearch', 'fleetMake', 'closedOpen',
 ];
 
 /* ------------------------------------------------------------------ *
