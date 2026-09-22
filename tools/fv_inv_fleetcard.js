@@ -4,7 +4,8 @@
  * The Fleet list is the 153-unit scanning surface. Contract: the headline is
  * make + model (make always, model appended when known) so identical
  * manufacturers read identically regardless of which fields are filled; the
- * kVA rating renders on its own right-aligned line (a unit with no job still
+ * size renders on its own right-aligned line — big iron in kW (per-engine on
+ * twins, twin-size-kw 2026-09-22), small iron in kVA (a unit with no job still
  * shows its size); empty-string and null are the same absence (the TGD
  * hand-entry lesson — coalesce, don't null-check).
  */
@@ -31,15 +32,18 @@ module.exports = async (app, t) => {
   t.includes(h, 'GEN · #S-NONE', 'neither -> GEN fallback');
   t.excludes(h, 'CAT  ·', 'no double-space artifacts');
 
-  t.group('fleet card: kVA renders on its own — no job placement required');
+  t.group('fleet card: size renders on its own — no job placement required');
   app.setState({ units: [
     mkUnit({ id: 'u-rated', serial: 'S-R', kw: 625, locationType: 'fleet', locationId: null }),
     mkUnit({ id: 'u-norating', serial: 'S-N', kw: null }),
   ] });
   const h2 = fleetHtml();
-  t.includes(h2, '625 kVA', 'unassigned unit still shows its size');
-  t.excludes(h2, 'null kVA', 'no rating -> no artifact');
-  t.excludes(h2, '>0 kVA', 'zero/blank never renders a fake rating');
+  t.includes(h2, '500 kW', 'unassigned big iron still shows its size — in kW (twin-size-kw 2026-09-22)');
+  t.excludes(h2, '625 kVA', 'the stored combined kVA never renders on big iron');
+  t.excludes(h2, 'null kW', 'no rating -> no artifact');
+  t.excludes(h2, 'null kVA', 'no rating -> no artifact (kVA path)');
+  t.excludes(h2, '>0 kW', 'zero/blank never renders a fake rating');
+  t.excludes(h2, '>0 kVA', 'zero/blank never renders a fake kVA rating');
 
   t.group('fleet card: TwinPak chip on the scanning surface');
   app.setState({ units: [
