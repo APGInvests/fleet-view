@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-09-22 job-closeout -->
+<!-- fleetview build 2026-09-28 pin-popup-size -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1189,6 +1189,32 @@ function makeMap(el,opts){const m=L.map(el,Object.assign({attributionControl:tru
   return m;}
 function renderMapScreen(){const s=currentShow();const toggle=s?`<div class="filterbar" style="margin-bottom:12px"><button class="fchip ${mapScope==='job'?'on':''}" onclick="mapScope='job';render()">This job</button><button class="fchip ${mapScope==='all'?'on':''}" onclick="mapScope='all';render()">All locations</button></div>`:'';return `<div class="between"><h2 class="section" style="margin:0">Map</h2>${s&&mapScope==='job'?`<span class="muted" style="font-family:var(--mono);font-size:11px">${esc(s.name)}</span>`:''}</div>${toggle}<div id="map"></div><p class="muted" id="mapNote" style="font-size:12px;margin-top:8px"></p>`;}
 function showUnitOnMap(unitId){const u=unitById(unitId);if(!u)return;if(!unitGps(u)){toast('No map pin for this one yet');openUnit(unitId);return;}mapFocusUnit=unitId;if(u.locationType==='show'&&u.locationId){S.currentShowId=u.locationId;mapScope='job';}else{mapScope='all';}const ov=$('#overlay');if(ov)ov.classList.remove('on');go('map');}
+/* Pin popup (2026-09-28): line 2 speaks size, same string as every card —
+   sizeText first, make/model fallback ONLY when no rating exists. Make/model
+   survives as a muted third-line FIELD CUE ("Airman" tells a tech what the
+   machine looks like walking up), filtered per field so size typed into the
+   model box ("150kva") can never duplicate the rating line — the make in
+   that pair still renders. No third line in the fallback case (it would
+   repeat line 2), no "Asset" placeholder ever. */
+function mmJunk(t){return /\d+\s*(kva|kw)/i.test(t);}
+function pinPopupHtml(u,sid){
+  const cc=statusHex(computeStatus(u).color);
+  const _area=jobLabel(u,sid)||'Unplaced';
+  const mm=[u.make,u.model].map(x=>String(x||'').trim()).filter(Boolean).join(' ');
+  const sz=sizeText(u);
+  const _sub=[(sz||mm),(u.serial?('#'+u.serial):'')].filter(Boolean).join(' · ');
+  const cue=sz?[u.make,u.model].map(x=>String(x||'').trim()).filter(x=>x&&!mmJunk(x)).join(' '):'';
+  return '<div style="min-width:174px;font-family:system-ui,sans-serif;color:#241d15">'
+    +'<div style="font-weight:800;font-size:15px;line-height:1.2">'+esc(_area)+'</div>'
+    +(_sub?'<div style="font-size:12px;color:#7a6f60;margin-top:1px">'+esc(_sub)+'</div>':'')
+    +(cue?'<div style="font-size:11.5px;color:#7a6f60;margin-top:1px">'+esc(cue)+'</div>':'')
+    +'<div style="font-size:12.5px;margin:7px 0 9px;font-weight:600"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+cc+';margin-right:6px;vertical-align:middle"></span>'+esc(computeStatus(u).label)+'</div>'
+    +'<div style="display:flex;gap:6px;margin-bottom:6px">'
+    +'<a href="#" onclick="openUnit(\''+u.id+'\');return false;" style="flex:1;text-align:center;background:#c77455;color:#fff;padding:7px 4px;border-radius:8px;font-size:12.5px;font-weight:700;text-decoration:none">Open</a>'
+    +'<a href="#" onclick="openPinEditor(\''+u.id+'\');return false;" style="flex:1;text-align:center;background:#ece6dd;color:#241d15;padding:7px 4px;border-radius:8px;font-size:12.5px;font-weight:700;text-decoration:none">Move</a>'
+    +'</div>'
+    +'<a href="#" onclick="mapSetLoc(\''+u.id+'\');return false;" style="display:block;text-align:center;background:#ece6dd;color:#241d15;padding:7px 4px;border-radius:8px;font-size:12.5px;font-weight:700;text-decoration:none">📍 Set to my location</a>'
+    +'</div>';}
 function drawMap(scopeShowId){const el=$('#map');if(!el)return;const note=$('#mapNote');let _focusM=null;
   let units=S.units.filter(u=>unitGps(u));if(scopeShowId)units=units.filter(u=>u.locationType==='show'&&u.locationId===scopeShowId);
   const site=scopeShowId?((showById(scopeShowId)||{}).site):null;
@@ -1202,17 +1228,7 @@ function drawMap(scopeShowId){const el=$('#map');if(!el)return;const note=$('#ma
     units.forEach(u=>{const g=unitGps(u);const cc=statusHex(computeStatus(u).color);const sid=scopeShowId||((u.locationType==='show')?u.locationId:null);
       const icon=L.divIcon({className:'',html:'<div style="width:16px;height:16px;border-radius:50%;background:'+cc+';border:2px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.55),0 2px 4px rgba(0,0,0,.4)"></div>',iconSize:[16,16]});
       const m=L.marker([g.lat,g.lng],{icon});if(mapFocusUnit&&u.id===mapFocusUnit)_focusM=m;
-      const _area=jobLabel(u,sid)||'Unplaced';const _sub=[(u.model||u.make||''),(u.serial?('#'+u.serial):'')].filter(Boolean).join(' · ');
-      m.bindPopup('<div style="min-width:174px;font-family:system-ui,sans-serif;color:#241d15">'
-        +'<div style="font-weight:800;font-size:15px;line-height:1.2">'+esc(_area)+'</div>'
-        +(_sub?'<div style="font-size:12px;color:#7a6f60;margin-top:1px">'+esc(_sub)+'</div>':'')
-        +'<div style="font-size:12.5px;margin:7px 0 9px;font-weight:600"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+cc+';margin-right:6px;vertical-align:middle"></span>'+esc(computeStatus(u).label)+'</div>'
-        +'<div style="display:flex;gap:6px;margin-bottom:6px">'
-        +'<a href="#" onclick="openUnit(\''+u.id+'\');return false;" style="flex:1;text-align:center;background:#c77455;color:#fff;padding:7px 4px;border-radius:8px;font-size:12.5px;font-weight:700;text-decoration:none">Open</a>'
-        +'<a href="#" onclick="openPinEditor(\''+u.id+'\');return false;" style="flex:1;text-align:center;background:#ece6dd;color:#241d15;padding:7px 4px;border-radius:8px;font-size:12.5px;font-weight:700;text-decoration:none">Move</a>'
-        +'</div>'
-        +'<a href="#" onclick="mapSetLoc(\''+u.id+'\');return false;" style="display:block;text-align:center;background:#ece6dd;color:#241d15;padding:7px 4px;border-radius:8px;font-size:12.5px;font-weight:700;text-decoration:none">📍 Set to my location</a>'
-        +'</div>');
+      m.bindPopup(pinPopupHtml(u,sid));
       pts.push([g.lat,g.lng]);if(layer)layer.addLayer(m);else m.addTo(mapObj);});
     if(layer)mapObj.addLayer(layer);
     if(units.length)mapObj.fitBounds(pts,{padding:[40,40],maxZoom:16});
