@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-09-28 pin-popup-size -->
+<!-- fleetview build 2026-09-28 report-readability -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1283,11 +1283,45 @@ function openJobLog(id){const s=showById(id);const ev=eventsForShow(id);const ki
 function openGlobalLog(){const ev=[];S.reports.forEach(r=>ev.push({t:r.timestamp,kind:'check',who:r.techName,uid:r.unitId,txt:'Vitals check'}));S.issues.forEach(i=>ev.push({t:i.timestamp,kind:'issue',who:i.techName,uid:i.unitId,txt:(i.title||i.severity)}));S.movements.forEach(m=>ev.push({t:m.timestamp,kind:'move',who:m.techName,uid:m.unitId,txt:(m.fromType?locName(m.fromType,m.fromId):'New')+' → '+(m.toType==='transit'?'en route':locName(m.toType,m.toId))}));ev.sort((a,b)=>b.t-a.t);const ki={check:IC.check,issue:IC.warn,move:IC.truck};
   sheet('Global log',`${ev.length?ev.slice(0,200).map(e=>{const u=unitById(e.uid);return `<div class="evrow"><div class="ei">${ki[e.kind]}</div><div class="et"><div class="ett">${esc(e.txt)} <b>#${esc(u?(u.serial||u.tagId):'?')}</b></div><div class="etm">${fmtDate(e.t)} · ${esc(e.who||'')}</div></div></div>`;}).join(''):'<div class="empty"><p class="muted">No activity yet.</p></div>'}`);}
 /* ===== REPORT ===== */
-function buildReportText(id){const s=showById(id)||currentShow();if(!s)return 'No job selected.';const units=unitsOnShow(s.id);const L=[];
-  L.push('GENERATOR STATUS REPORT');L.push('Job: '+s.name+(s.location?(', '+s.location):''));L.push('Date: '+new Date().toLocaleString());L.push('By: '+(S.settings.techName||'—'));L.push('Units: '+units.length);L.push('');
-  const grp=(t,arr)=>{if(!arr.length)return;L.push('== '+t+' ('+arr.length+') ==');arr.forEach(u=>{const cs=computeStatus(u);const sv=serviceState(u);L.push('• #'+(u.serial||u.tagId)+' ['+[u.make,u.model].filter(Boolean).join(' ')+']  '+cs.label+(u.currentHours!=null?(' | '+u.currentHours+'h'):'')+(sv.state!=='unknown'?(' | '+(sv.remaining<=0?('OVER '+Math.abs(sv.remaining)+'h'):(sv.remaining+'h to svc'))):''));openIssuesFor(u.id).forEach(i=>L.push('    - ['+i.severity+'] '+(i.title?i.title+': ':'')+(i.text||'')));});L.push('');};
-  grp('HARD DOWN',units.filter(u=>computeStatus(u).color==='red'));grp('NEEDS / OVER SERVICE',units.filter(u=>computeStatus(u).color==='orange'));grp('COSMETIC',units.filter(u=>computeStatus(u).color==='yellow'));
-  const ok=units.filter(u=>['green','grey','blue'].includes(computeStatus(u).color));L.push('== RUNNING / OK ('+ok.length+') ==');L.push(ok.map(u=>'#'+(u.serial||u.tagId)).join(', ')||'(none)');
+/* End-of-show report (rewritten 2026-09-28, `report-readability`) — written for
+   an operations reader who has never heard of FleetView. Plain text only.
+   Contracts (pinned in tools/fv_inv_report.js): four fixed sections in priority
+   order, blank-line separated, empty ones say "none"; unit lines speak the card
+   vocabulary (size · job label · #serial); cosmetic issues render ONLY in their
+   own section, never inside a hard-down entry; a cosmetic-only unit still lists
+   as RUNNING OK (non-blocking by definition, so the first three unit sections
+   partition the fleet); twins never print flat currentHours (§4 pre-split seed)
+   and their service call-out names the engine; photos are "(N photos on file)",
+   NEVER a URL — the Storage links are permanent and public (Andy, 2026-09-28). */
+function buildReportText(id){const s=showById(id)||currentShow();if(!s)return 'No job selected.';const units=sortUnits(unitsOnShow(s.id).slice());const L=[];
+  L.push('GENERATOR STATUS REPORT');
+  L.push('Field status report from the on-site power crew — the current condition of every generator on this job.');
+  L.push('');
+  L.push('Job: '+s.name+(s.location?(' — '+s.location):''));
+  L.push('Date: '+new Date().toLocaleString());
+  L.push('Filed by: '+(S.settings.techName||'—'));
+  L.push('Units: '+units.length);
+  const uline=u=>{const st=sizeText(u);const mm=[u.make,u.model].filter(Boolean).join(' ');
+    return '• '+[st||mm||null,jobLabel(u,s.id)||null,'#'+(u.serial||u.tagId)].filter(Boolean).join(' · ');};
+  const dline=u=>{const cs=computeStatus(u);const sv=serviceState(u);const parts=[cs.label];
+    if(!isTwin(u)&&u.currentHours!=null)parts.push(u.currentHours+' h');
+    if(sv.state!=='unknown'&&sv.remaining!=null){let sw=sv.remaining<=0?('OVER '+Math.abs(sv.remaining)+' h past service'):(sv.remaining+' h to service');
+      if(isTwin(u)){const e=worstServiceEngine(u).engine;if(e)sw=engName(u,e)+' '+sw;}
+      parts.push(sw);}
+    return '  '+parts.join(' · ');};
+  const iline=i=>{const n=(i.photos||[]).length;
+    return '  - ['+i.severity+'] '+(i.title||'')+(i.title&&i.text?': ':'')+(i.text||'')+(n?(' ('+n+(n===1?' photo':' photos')+' on file)'):'');};
+  const pushSec=(title,count,entries)=>{L.push('');L.push('== '+title+' ('+count+') ==');
+    if(!entries.length){L.push('none');return;}
+    entries.forEach((e,i)=>{if(i)L.push('');e.forEach(x=>L.push(x));});};
+  const col=u=>computeStatus(u).color;
+  const unitEntry=u=>[uline(u),dline(u)].concat(openIssuesFor(u.id).filter(i=>i.severity!=='cosmetic').map(iline));
+  pushSec('HARD DOWN',units.filter(u=>col(u)==='red').length,units.filter(u=>col(u)==='red').map(unitEntry));
+  pushSec('NEEDS / OVER SERVICE',units.filter(u=>col(u)==='orange').length,units.filter(u=>col(u)==='orange').map(unitEntry));
+  const cos=units.map(u=>({u,items:openIssuesFor(u.id).filter(i=>i.severity==='cosmetic')})).filter(x=>x.items.length);
+  pushSec('COSMETIC / NON-BLOCKING',cos.reduce((n,x)=>n+x.items.length,0),cos.map(x=>[uline(x.u)].concat(x.items.map(iline))));
+  const ok=units.filter(u=>['green','grey','blue','yellow'].includes(col(u)));
+  pushSec('RUNNING OK',ok.length,ok.length?[[ok.map(u=>'#'+(u.serial||u.tagId)).join(', ')]]:[]);
   return L.join('\n');}
 function openReport(id){if(!id){toast('Open a job first');return;}
   sheet('End-of-show report',`<label class="fld"><span class="lb">Service dept email</span><input id="svcEmail" placeholder="service@company.com" value="${esc(S.settings.svcEmail||'')}"/></label>
