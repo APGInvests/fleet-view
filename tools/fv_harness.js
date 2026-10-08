@@ -177,11 +177,38 @@ function makeSupabase(calls, opts) {
     // back as { error }, they do not throw.
     const err = (op, payload) => (opts.writeError ? opts.writeError(table, op, payload) : null);
     const chain = {
-      select(cols) {
+      select(cols, selOpts) {
         rec('select', cols);
-        const e = opts.readError ? opts.readError(table) : null;
-        const td = opts.tableData || {};
-        return Promise.resolve(e ? { data: null, error: e } : { data: td[table] || [], error: null });
+        // Builder thenable mirroring supabase-js v2: .order()/.range()/.abortSignal()
+        // chain, awaiting resolves { data, error, count }. Legacy shape preserved:
+        // awaiting a bare select('*') still yields the full table.
+        // Failure injection (all lazy, flippable mid-run via app.opts):
+        //   opts.readError(table)      -> whole-select error (page 1 included)
+        //   opts.pageError(table, lo)  -> error on the page starting at row `lo`
+        //   opts.tableCount(table, n)  -> override the exact count (simulate truncation:
+        //                                 count says more rows than tableData holds)
+        const st = { order: null, lo: null, hi: null, count: (selOpts && selOpts.count) || null };
+        const resolve = () => {
+          const e = opts.readError ? opts.readError(table) : null;
+          if (e) return { data: null, error: e, count: null };
+          const td = opts.tableData || {};
+          let rows = (td[table] || []).slice();
+          if (st.order) rows.sort((a, b) => (String(a[st.order]) < String(b[st.order]) ? -1 : 1));
+          const total = opts.tableCount ? opts.tableCount(table, rows.length) : rows.length;
+          if (st.lo != null) {
+            const pe = opts.pageError ? opts.pageError(table, st.lo) : null;
+            if (pe) return { data: null, error: pe, count: null };
+            rows = rows.slice(st.lo, st.hi + 1);
+          }
+          return { data: rows, error: null, count: st.count === 'exact' ? total : null };
+        };
+        const b = {
+          order(col) { rec('order', col); st.order = col; return b; },
+          range(lo, hi) { rec('range', { lo, hi }); st.lo = lo; st.hi = hi; return b; },
+          abortSignal() { rec('abortSignal', null); return b; },
+          then(res, rej) { return Promise.resolve(resolve()).then(res, rej); },
+        };
+        return b;
       },
       upsert(rows) {
         rec('upsert', rows);
@@ -306,7 +333,7 @@ const LIVE_BINDINGS = [
   'TABLES', 'MAPS', 'DT', 'SC', 'NAV', 'KEY',
   'DEAD', 'KV', 'OFFLINE',
   'SYNC_FAILS', 'SYNC_LOST', 'DEAD',
-  'NET_DOWN', 'CACHE_BROKEN', 'CACHE_AGE', 'RETRYABLE',
+  'NET_DOWN', 'CACHE_BROKEN', 'CACHE_AGE', 'RETRYABLE', 'SYNC_SHORT',
   'STORAGE_PERSISTED', 'scanAskHours', 'scanCamOpen',
   'fleetFilter', 'fleetSearch', 'fleetMake', 'closedOpen',
 ];

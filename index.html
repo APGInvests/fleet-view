@@ -13,7 +13,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="FleetView" />
 <title>FleetView — Generator Fleet Tracker</title>
-<!-- fleetview build 2026-09-28 report-readability -->
+<!-- fleetview build 2026-10-08 load-paged -->
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -379,14 +379,49 @@ function mergeServerState(t,serverRows){
    keeps local rows AND the old SNAP — a reload (or a failed select) must never
    launder unsaved work clean. Units resolve by updatedAt LWW; losers park in
    SYNC_LOST, surfaced through the sync chip. */
+/* ===== PAGED READS (load-paged) =====
+   The server caps any single response (PostgREST max-rows — the 2026-09-30
+   incident: reports crossed the cap and every phone silently "lost" its newest
+   checks, because a truncated-but-OK response merged as truth and
+   mergeServerState dropped the rows it omitted). Reads are now paged in
+   PAGE_ROWS chunks with a stable order, assembled ATOMICALLY per table, and
+   cross-checked against the server's exact count. Rule 12's read twin: a
+   response missing rows must never merge as truth — it degrades to the
+   failed-read path (keep local rows + SNAP) and lights the chip instead.
+   Offline is unchanged by construction: a dead zone produces page ERRORS
+   (-> failed-read path, existing offline chip), never a "short read". */
+const PAGE_ROWS=1000;
+let SYNC_SHORT={};  /* table -> {got,total,ts} while a strict short read stands; cleared by the next complete read */
+async function fetchTable(t){
+  const rows=[];let count=null;
+  for(let lo=0;;lo+=PAGE_ROWS){
+    /* per-page timeout: a dead-zone fetch HANGS rather than fails — un-timed
+       selects is how the jobs list never painted (2026-08-04). order('id') is
+       load-bearing: unordered range pagination shifts rows across page
+       boundaries under concurrent writes. */
+    let q=sb.from(t).select('*',lo===0?{count:'exact'}:undefined).order('id').range(lo,lo+PAGE_ROWS-1);
+    try{if(q.abortSignal&&typeof AbortSignal!=='undefined'&&AbortSignal.timeout)q=q.abortSignal(AbortSignal.timeout(8000));}catch(e){}
+    let res;try{res=await q;}catch(e){res={data:null,error:e};}
+    if(res.error)return{error:res.error};  /* ANY page failure fails the whole table — pages never merge partially */
+    if(lo===0&&typeof res.count==='number')count=res.count;
+    const page=res.data||[];for(const r of page)rows.push(r);
+    if(page.length<PAGE_ROWS)break;
+  }
+  return{rows,count};
+}
 async function loadAll(){let errs=0;for(const t of TABLES){
-  /* per-table timeout: a dead-zone fetch HANGS rather than fails — seven
-     un-timed sequential selects is how the jobs list never painted (2026-08-04) */
-  let q=sb.from(t).select('*');
-  try{if(q.abortSignal&&typeof AbortSignal!=='undefined'&&AbortSignal.timeout)q=q.abortSignal(AbortSignal.timeout(8000));}catch(e){}
-  let res;try{res=await q;}catch(e){res={data:null,error:e};}
-  if(res.error){errs++;console.warn('load',t,res.error.message||res.error);continue;}
-  mergeServerState(t,(res.data||[]).map(r=>fromRow(t,r)));}
+  let r=await fetchTable(t);
+  /* received<count can be a benign write race (another phone inserting
+     mid-load); one immediate retry separates a race from real truncation.
+     received>count is quiet by construction (strict <). */
+  if(!r.error&&r.count!=null&&r.rows.length<r.count)r=await fetchTable(t);
+  if(r.error){errs++;console.warn('load',t,r.error.message||r.error);continue;}
+  if(r.count!=null&&r.rows.length<r.count){
+    SYNC_SHORT[t]={got:r.rows.length,total:r.count,ts:now()};
+    console.warn('load',t,'short read '+r.rows.length+'/'+r.count+' — kept local copy');
+    continue;}  /* deliberately NOT errs++: the server answered; truncation must not read as offline */
+  delete SYNC_SHORT[t];
+  mergeServerState(t,r.rows.map(x=>fromRow(t,x)));}
   NET_DOWN=(errs===TABLES.length);
   updateSyncChip();persistCache();}
 let SNAP={};
@@ -488,18 +523,21 @@ async function flush(){if(!SYNC_READY||flushing)return;flushing=true;let netFail
   else if(pend)scheduleFlush();}
 function updateSyncChip(){const el=$('#syncChip');if(!el)return;
   const failed=!!Object.keys(SYNC_FAILS).length;const pend=SYNC_FAILS['(pending)']||0;
-  const stuck=Object.keys(DEAD).length;const lost=SYNC_LOST.length;
-  if(!failed&&!stuck&&!lost&&!NET_DOWN&&!CACHE_BROKEN){el.style.display='none';return;}
+  const stuck=Object.keys(DEAD).length;const lost=SYNC_LOST.length;const short=Object.keys(SYNC_SHORT).length;
+  if(!failed&&!stuck&&!lost&&!short&&!NET_DOWN&&!CACHE_BROKEN){el.style.display='none';return;}
   const parts=[];
   if(NET_DOWN)parts.push('offline'+(CACHE_AGE?(' · saved copy '+fmtAgo(CACHE_AGE)):''));
   if(failed)parts.push(pend?(pend+' unsaved'):'sync failed');
   if(stuck)parts.push(stuck+' stuck');if(lost)parts.push(lost+' overwritten');
+  if(short)parts.push('partial server read · showing saved copy');
   if(CACHE_BROKEN)parts.push('no offline backup on this phone');
   el.style.display='';el.textContent='⚠ '+parts.join(' · ');}
 function openSyncStatus(){const failed=!!Object.keys(SYNC_FAILS).length;const pend=SYNC_FAILS['(pending)']||0;const dk=Object.keys(DEAD);
+  const shortKeys=Object.keys(SYNC_SHORT);
+  const shortSec=shortKeys.length?`<h2 class="section sm">Partial server read</h2><p class="muted" style="font-size:12px">${shortKeys.map(t=>{const x=SYNC_SHORT[t];return 'Server returned '+x.got+' of '+x.total+' rows for '+esc(t)+'.';}).join(' ')} Your phone's full copy is shown. Retries automatically.</p>`:'';
   const stuckRows=dk.map(k=>{const d=DEAD[k];const label=(d.row&&(d.row.serial||d.row.title))||d.rowId||d.table;
     return `<div class="card" style="padding:12px;margin-bottom:8px;border-left:5px solid var(--red)"><div class="between"><b style="font-size:13px">${esc(d.table)} · ${esc(String(label))}</b><span class="muted" style="font-size:11px">${fmtDate(d.ts)}</span></div><div class="muted" style="font-size:11px;margin-top:3px">${esc(d.error)}</div><div class="row" style="margin-top:8px"><button class="btn dark sm wide" onclick="retryDead('${esc(k)}');closeSheet();toast('Retrying…')">Retry</button><button class="btn ghost sm wide" onclick="copyDead('${esc(k)}')">Copy JSON</button></div></div>`;}).join('');
-  sheet('Sync status',`<div class="card" style="padding:13px;margin-bottom:12px"><div class="kv"><div class="k">Unsaved</div><div>${failed?((pend||'connection error')+' — retrying every 30s'):'0'}</div><div class="k">Stuck</div><div>${dk.length}</div><div class="k">Overwritten</div><div>${SYNC_LOST.length}</div>${STORAGE_PERSISTED===false?'<div class="k">Offline copy</div><div>best-effort — the browser may clear it to free space</div>':''}</div></div>${dk.length?`<h2 class="section sm">Stuck — the server refused these</h2><p class="muted" style="font-size:12px">Parked so they can't block anything else. Nothing is deleted. If the rejection was temporary (a setting or column that changed), <b>Retry</b> sends it again.</p>${stuckRows}`:''}${SYNC_LOST.length?`<h2 class="section sm">Overwritten while unsaved</h2><p class="muted" style="font-size:12px">Someone else saved a newer version before your change went through. Your entry is kept here — copy it out if it still matters, then re-enter what's current.</p><button class="btn ghost sm" style="margin:0 0 10px" onclick="dismissAllLost()">Dismiss all (${SYNC_LOST.length})</button>${SYNC_LOST.map((x,i)=>`<div class="card" style="padding:12px;margin-bottom:8px;border-left:5px solid var(--orange)"><div class="between"><b style="font-size:13px">#${esc(x.serial)}</b><span class="muted" style="font-size:11px">${fmtDate(x.ts)}</span></div><div class="muted" style="font-size:11.5px;margin-top:4px">${esc(String(x.row&&x.row.notes||''))}</div><div class="row" style="margin-top:8px"><button class="btn ghost sm wide" onclick="copyLost(${i})">Copy JSON</button><button class="btn ghost sm wide" onclick="dismissLost(${i})">Dismiss</button></div></div>`).join('')}`:''}<button class="btn primary block" onclick="retrySync();closeSheet()">Sync now</button>`);}
+  sheet('Sync status',`<div class="card" style="padding:13px;margin-bottom:12px"><div class="kv"><div class="k">Unsaved</div><div>${failed?((pend||'connection error')+' — retrying every 30s'):'0'}</div><div class="k">Stuck</div><div>${dk.length}</div><div class="k">Overwritten</div><div>${SYNC_LOST.length}</div>${STORAGE_PERSISTED===false?'<div class="k">Offline copy</div><div>best-effort — the browser may clear it to free space</div>':''}</div></div>${shortSec}${dk.length?`<h2 class="section sm">Stuck — the server refused these</h2><p class="muted" style="font-size:12px">Parked so they can't block anything else. Nothing is deleted. If the rejection was temporary (a setting or column that changed), <b>Retry</b> sends it again.</p>${stuckRows}`:''}${SYNC_LOST.length?`<h2 class="section sm">Overwritten while unsaved</h2><p class="muted" style="font-size:12px">Someone else saved a newer version before your change went through. Your entry is kept here — copy it out if it still matters, then re-enter what's current.</p><button class="btn ghost sm" style="margin:0 0 10px" onclick="dismissAllLost()">Dismiss all (${SYNC_LOST.length})</button>${SYNC_LOST.map((x,i)=>`<div class="card" style="padding:12px;margin-bottom:8px;border-left:5px solid var(--orange)"><div class="between"><b style="font-size:13px">#${esc(x.serial)}</b><span class="muted" style="font-size:11px">${fmtDate(x.ts)}</span></div><div class="muted" style="font-size:11.5px;margin-top:4px">${esc(String(x.row&&x.row.notes||''))}</div><div class="row" style="margin-top:8px"><button class="btn ghost sm wide" onclick="copyLost(${i})">Copy JSON</button><button class="btn ghost sm wide" onclick="dismissLost(${i})">Dismiss</button></div></div>`).join('')}`:''}<button class="btn primary block" onclick="retrySync();closeSheet()">Sync now</button>`);}
 function copyLost(i){try{navigator.clipboard.writeText(JSON.stringify(SYNC_LOST[i],null,2));}catch(e){}toast('Copied');}
 function dismissLost(i){SYNC_LOST.splice(i,1);persistCache();updateSyncChip();openSyncStatus();}
 function dismissAllLost(){SYNC_LOST=[];persistCache();updateSyncChip();openSyncStatus();}
