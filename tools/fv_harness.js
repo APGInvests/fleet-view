@@ -336,7 +336,7 @@ const LIVE_BINDINGS = [
   'NET_DOWN', 'CACHE_BROKEN', 'CACHE_AGE', 'RETRYABLE', 'SYNC_SHORT',
   'STORAGE_PERSISTED', 'scanAskHours', 'scanCamOpen',
   'lastReceipt', 'receiptCount', 'addViaSearch',
-  'fleetFilter', 'fleetSearch', 'fleetMake', 'closedOpen',
+  'fleetFilter', 'fleetSearch', 'fleetMake', 'closedOpen', 'vsegVal',
 ];
 
 /* ------------------------------------------------------------------ *

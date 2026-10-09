@@ -230,10 +230,14 @@ module.exports = async (app, t) => {
   F.logVitals('tw', 'B');
   let sheet = app.document.getElementById('sheet').innerHTML;
   t.includes(sheet, 'Gen B', 'the form says which engine is being checked');
-  t.includes(sheet, 'data-v="down" class="on"', "B's form pre-selects DOWN, B's own status");
+  /* Down left the segment 2026-10-09: a down engine's form pre-selects NOTHING
+     (the buttons are where it GOES) and says why. */
+  t.excludes(sheet.slice(sheet.indexOf('id="v_seg"'), sheet.indexOf('id="v_elec"')),
+    'class="on"', "B is down: the form pre-selects nothing — no button claims a state");
+  t.includes(sheet, 'Currently DOWN', "and the form names B's real state");
   F.logVitals('tw', 'A');
   sheet = app.document.getElementById('sheet').innerHTML;
-  t.includes(sheet, 'data-v="running" class="on"', "A's form pre-selects RUNNING, A's own status");
+  t.includes(sheet, 'data-v="running" class="on"', "A's form pre-selects Online, A's own status");
   /* the pre-split meter must not be offered as a starting value on any engine */
   app.setState({ settings: tech(), units: [twin()], reports: [] });
   F.logVitals('tw', 'B');

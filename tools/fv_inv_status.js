@@ -85,7 +85,10 @@ module.exports = (app, t) => {
   let sh = F.statusSeg(set([unit({ opStatus: 'down' })]), null);
   t.includes(sh, 'data-v', 'renders a segmented control');
   t.includes(sh, "setStatus('u1','','running')", 'with a one-tap running action');
-  t.ok(/class="on"[^>]*>Down</.test(sh.replace(/style="[^"]*"/g, '')), 'Down is the selected option');
+  /* Down is no longer a button (2026-10-09): a down unit's row selects nothing
+     and carries the DOWN banner naming the recovery path. */
+  t.excludes(sh.replace(/style="[^"]*"/g, ''), 'class="on"', 'a down unit pre-selects nothing');
+  t.includes(sh, 'DOWN', 'the banner names the state instead');
   t.excludes(F.statusSeg(set([unit({ opStatus: 'staged' })]), null).replace(/style="[^"]*"/g, ''),
     'class="on">Running', 'Running is never selected by default');
   /* an engine nobody has observed selects nothing at all */
@@ -132,14 +135,16 @@ module.exports = (app, t) => {
   F.openUnit('u1');
   let html = app.document.getElementById('sheet').innerHTML;
   t.includes(html, "setStatus('u1','','running')", 'a single-engine unit shows the control inline');
-  t.includes(html, "setStatus('u1','','down')", 'with all three states reachable in one tap');
+  t.includes(html, "setStatus('u1','','offline')", 'with all three states reachable in one tap');
+  t.excludes(html, "setStatus('u1','','down')", 'down is NOT a quick state (2026-10-09) — Flag Issue owns it');
   t.includes(html, "logVitals('u1')", 'and the check flow is unchanged beside it');
   set([twin('running', 'staged')]);
   F.openUnit('tw');
   html = app.document.getElementById('sheet').innerHTML;
-  t.includes(html, "setStatus('tw','A','down')", 'a twin gets a control on the Gen A row');
-  t.includes(html, "setStatus('tw','B','down')", 'and on the Gen B row');
-  t.excludes(html, "setStatus('tw','','down')", 'and no chassis-level control on a twin');
+  t.includes(html, "setStatus('tw','A','offline')", 'a twin gets a control on the Gen A row');
+  t.includes(html, "setStatus('tw','B','offline')", 'and on the Gen B row');
+  t.excludes(html, "setStatus('tw','','offline')", 'and no chassis-level control on a twin');
+  t.excludes(html, "'down')", 'no down button on either engine row');
   t.eq((html.match(/setStatus\(/g) || []).length, 6, 'exactly three options per engine, no more');
 
   /* ---------------------------------------------------------------- */

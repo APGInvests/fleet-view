@@ -114,4 +114,59 @@ module.exports = (app, t) => {
     t.includes(fleet, 'OVER SERVICE', 'fleet card keeps the service fact (chip, not pill)');
     t.includes(fleet, 'ONLINE', 'fleet pill is the state');
   }
+
+  t.group('quick row: STAGED / ONLINE / OFFLINE — down is not a button anywhere');
+  {
+    base([mkU({})]);
+    const seg = F.statusSeg(app.S.units[0], null);
+    t.includes(seg, 'data-v="offline"', 'offline button exists');
+    t.includes(seg, '>Online<', 'running renders as Online');
+    t.excludes(seg, 'data-v="down"', 'down is not a quick state');
+    t.ok(seg.indexOf('data-v="staged"') < seg.indexOf('data-v="running"')
+      && seg.indexOf('data-v="running"') < seg.indexOf('data-v="offline"'),
+      'lifecycle order: Staged · Online · Offline');
+    // A down unit: no button selected, and the row says why.
+    base([mkU({ opStatus: 'down' })]);
+    const dseg = F.statusSeg(app.S.units[0], null);
+    t.excludes(dseg.replace(/style="[^"]*"/g, ''), 'class="on"', 'down preselects nothing');
+    t.includes(dseg, 'DOWN', 'the down banner names the state');
+    t.includes(dseg, 'resolve', 'and points at the recovery path');
+  }
+
+  t.group('check form: segment matches the quick row; offline collapses electricals');
+  {
+    base([ mkU({ id: 'u-cf-run', klass: 'big' }),
+      mkU({ id: 'u-cf-off', klass: 'big', opStatus: 'offline' }),
+      mkU({ id: 'u-cf-dn', klass: 'big', opStatus: 'down' }) ]);
+    F.logVitals('u-cf-run');
+    const fRun = app.document.querySelector('#sheet').innerHTML;
+    t.includes(fRun, 'data-v="offline"', 'form segment offers Offline');
+    t.excludes(fRun, 'data-v="down"', 'form segment has no Down button — Flag Issue owns down');
+    t.includes(fRun, 'Flip Status to Online', 'elecOff copy speaks the new vocabulary');
+    F.logVitals('u-cf-off');
+    const fOff = app.document.querySelector('#sheet').innerHTML;
+    t.includes(fOff, 'data-v="offline" class="on"', 'offline unit pre-selects Offline (rule 3: current status)');
+    t.eq(app.live.vsegVal, 'offline', 'segment state starts on offline');
+    // vsegElec: offline collapses like staged (display-only).
+    const elec = app.document.querySelector('#v_elec');
+    F.vsegElec();
+    t.eq(elec.style.display, 'none', 'offline hides the electrical grid');
+    F.logVitals('u-cf-dn');
+    const fDn = app.document.querySelector('#sheet').innerHTML;
+    t.excludes(fDn.slice(fDn.indexOf('id="v_seg"'), fDn.indexOf('</div>', fDn.indexOf('id="v_seg"'))),
+      'class="on"', 'a down unit preselects nothing on the form');
+    t.includes(fDn, 'Currently DOWN', 'and the form says why');
+  }
+
+  t.group('twin aggregation: offline sits between running and staged');
+  {
+    const twin = (a, b) => { base([mkU({ engines: { style: 'AB',
+      A: { kvaEach: 500, opStatus: a }, B: { kvaEach: 500, opStatus: b } } })]);
+      return F.computeStatus(app.S.units[0]); };
+    t.eq(twin('running', 'offline').label, 'ONLINE', 'one engine running => trailer ONLINE (rotation is normal)');
+    t.eq(twin('offline', 'offline').label, 'OFFLINE', 'both deliberately off => OFFLINE');
+    t.eq(twin('offline', 'staged').label, 'OFFLINE', 'a deliberate act outranks the default state');
+    t.eq(twin('offline', 'down').label, 'GEN B DOWN', 'down still outranks everything');
+    t.eq(twin('offline', 'offline').color, 'teal', 'clean all-offline trailer reads calm');
+  }
 };
