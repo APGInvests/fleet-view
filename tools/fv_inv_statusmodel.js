@@ -287,4 +287,27 @@ module.exports = (app, t) => {
     t.eq(app.S.status_events.length, 1, 'no-issue tap writes exactly one event');
     t.eq(app.S.units[0].opStatus, 'offline', 'and flips the unit');
   }
+
+  t.group('report: offline is deliberate, in RUNNING OK, in plain words');
+  {
+    base([ mkU({ serial: 'RUN1' }),
+      mkU({ serial: 'OFF1', opStatus: 'offline' }),
+      mkU({ serial: 'OFF2', opStatus: 'offline', currentHours: 3200, serviceDueHours: 3022 }) ]);
+    const R = F.buildReportText('s1');
+    t.includes(R, '== RUNNING OK (2) ==', 'clean offline counts in RUNNING OK');
+    t.includes(R, '#RUN1', 'running serial listed');
+    t.includes(R, 'Switched off on purpose (generator rotation — not a fault): #OFF1',
+      'offline named in words an outsider cannot read as a failure');
+    t.ok(R.indexOf('#OFF1') > R.indexOf('== RUNNING OK'), 'offline line lives inside RUNNING OK');
+    // over-service offline still escalates to the service section, honestly:
+    t.ok(R.indexOf('#OFF2') > R.indexOf('== NEEDS / OVER SERVICE')
+      && R.indexOf('#OFF2') < R.indexOf('== COSMETIC'), 'offline+over-service sits in NEEDS/OVER');
+    t.includes(R, 'OFFLINE (deliberate)', 'its detail line says deliberate');
+    t.excludes(R, 'undefined', 'no template leaks');
+    // all-running control: the offline line simply absent
+    base([mkU({ serial: 'RUN9' })]);
+    const R2 = F.buildReportText('s1');
+    t.excludes(R2, 'Switched off', 'no offline => no rotation line');
+    t.includes(R2, '== RUNNING OK (1) ==', 'partition intact');
+  }
 };

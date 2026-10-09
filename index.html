@@ -1420,7 +1420,10 @@ function buildReportText(id){const s=showById(id)||currentShow();if(!s)return 'N
   L.push('Units: '+units.length);
   const uline=u=>{const st=sizeText(u);const mm=[u.make,u.model].filter(Boolean).join(' ');
     return '• '+[st||mm||null,jobLabel(u,s.id)||null,'#'+(u.serial||u.tagId)].filter(Boolean).join(' · ');};
-  const dline=u=>{const cs=computeStatus(u);const sv=serviceState(u);const parts=[cs.label];
+  const dline=u=>{const cs=computeStatus(u);const sv=serviceState(u);
+    /* An ops reader has never heard of this app: "OFFLINE" alone could read as
+       a fault, so the detail line says deliberate wherever it appears. */
+    const parts=[cs.state==='offline'?'OFFLINE (deliberate)':cs.label];
     if(!isTwin(u)&&u.currentHours!=null)parts.push(u.currentHours+' h');
     if(sv.state!=='unknown'&&sv.remaining!=null){let sw=sv.remaining<=0?('OVER '+Math.abs(sv.remaining)+' h past service'):(sv.remaining+' h to service');
       if(isTwin(u)){const e=worstServiceEngine(u).engine;if(e)sw=engName(u,e)+' '+sw;}
@@ -1437,8 +1440,16 @@ function buildReportText(id){const s=showById(id)||currentShow();if(!s)return 'N
   pushSec('NEEDS / OVER SERVICE',units.filter(u=>col(u)==='orange').length,units.filter(u=>col(u)==='orange').map(unitEntry));
   const cos=units.map(u=>({u,items:openIssuesFor(u.id).filter(i=>i.severity==='cosmetic')})).filter(x=>x.items.length);
   pushSec('COSMETIC / NON-BLOCKING',cos.reduce((n,x)=>n+x.items.length,0),cos.map(x=>[uline(x.u)].concat(x.items.map(iline))));
-  const ok=units.filter(u=>['green','grey','blue','yellow'].includes(col(u)));
-  pushSec('RUNNING OK',ok.length,ok.length?[[ok.map(u=>'#'+(u.serial||u.tagId)).join(', ')]]:[]);
+  const ok=units.filter(u=>['green','grey','blue','yellow','teal'].includes(col(u)));
+  /* Offline units are fine-by-design, so they count in RUNNING OK — but on
+     their own line, in words an outside reader can't mistake for a problem
+     (Andy, 2026-10-09). The three unit sections still partition the fleet. */
+  const okOff=ok.filter(u=>computeStatus(u).state==='offline');
+  const okRun=ok.filter(u=>computeStatus(u).state!=='offline');
+  const okEntries=[];
+  if(okRun.length)okEntries.push([okRun.map(u=>'#'+(u.serial||u.tagId)).join(', ')]);
+  if(okOff.length)okEntries.push(['Switched off on purpose (generator rotation — not a fault): '+okOff.map(u=>'#'+(u.serial||u.tagId)).join(', ')]);
+  pushSec('RUNNING OK',ok.length,okEntries);
   return L.join('\n');}
 function openReport(id){if(!id){toast('Open a job first');return;}
   sheet('End-of-show report',`<label class="fld"><span class="lb">Service dept email</span><input id="svcEmail" placeholder="service@company.com" value="${esc(S.settings.svcEmail||'')}"/></label>
