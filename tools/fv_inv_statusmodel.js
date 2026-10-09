@@ -76,4 +76,42 @@ module.exports = (app, t) => {
     t.eq(tr.label, 'IN TRANSIT', 'transit pill unchanged');
     t.eq(tr.color, 'blue', 'clean transit stays blue');
   }
+
+  t.group('service fact never leaves the card: runway chip OR fallback chip, exactly one');
+  {
+    const NOW = Date.now(), days = (n) => n * 864e5;
+    // Over service, no fresh post-arrival reading => runway absent => fallback renders.
+    base([mkU({ currentHours: 3200, serviceDueHours: 3022 })]);
+    const u = app.S.units[0];
+    t.eq(F.svcRunway(u), null, 'control: no runway (no arrival movement + reading)');
+    const card = F.unitCard(u, 's1');
+    t.includes(card, 'OVER SERVICE', 'fallback chip carries the fact the pill used to');
+    t.ok(/chip bad">🔧 OVER SERVICE/.test(card), 'and it is a red chip, not the pill');
+    t.includes(card, 'ONLINE', 'pill untouched beside it');
+    // Service soon => warn chip with the hours
+    base([mkU({ currentHours: 3010, serviceDueHours: 3022 })]);
+    const soon = F.unitCard(app.S.units[0], 's1');
+    t.ok(/chip warn">🔧 12 h to service/.test(soon), 'soon state names the hours');
+    // Healthy => no chip at all
+    base([mkU({ currentHours: 100, serviceDueHours: 500 })]);
+    t.excludes(F.unitCard(app.S.units[0], 's1'), '🔧', 'healthy unit carries no service chip');
+    // With a provable runway the fallback must NOT duplicate: exactly one 🔧.
+    const rw = mkU({ serial: 'RW1', currentHours: 3200, serviceDueHours: 3022 });
+    base([rw], {
+      movements: [{ id: 'mv-rw', unitId: rw.id, fromType: 'shop', fromId: 'sh-x',
+        toType: 'show', toId: 's1', techName: 'Mike R.', timestamp: NOW - days(10),
+        gps: null, photos: null, kind: null }],
+      reports: [{ id: 'r-rw', unitId: rw.id, showId: 's1', techName: 'Mike R.',
+        timestamp: NOW - days(3), gps: null, engine: null, engineHours: 3200 }] });
+    const u2 = app.S.units[0];
+    t.ok(F.svcRunway(u2), 'control: runway is provable');
+    const card2 = F.unitCard(u2, 's1');
+    t.eq((card2.match(/🔧/g) || []).length, 1, 'exactly one wrench chip — runway wins, fallback stands down');
+    t.includes(card2, 'OVER 178 h', 'and it is the runway chip (real reading, real hours)');
+    // The fleet registry card carries the fallback too (its pill used to say it).
+    base([mkU({ currentHours: 3200, serviceDueHours: 3022, locationType: 'fleet', locationId: null })]);
+    const fleet = F.renderFleet();
+    t.includes(fleet, 'OVER SERVICE', 'fleet card keeps the service fact (chip, not pill)');
+    t.includes(fleet, 'ONLINE', 'fleet pill is the state');
+  }
 };
