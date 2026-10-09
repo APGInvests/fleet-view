@@ -777,7 +777,7 @@ pins are the last logged movement, not surveyed positions.
 | units.klass | 'big' or 'small' iron |
 | units.tag_id | Barcode/scan code when it differs from the serial — a shortcut, never a second identity |
 | units.has_def | \`yes\` = unit has a DEF tank (per-unit flag, small iron; blank = no/unknown). Gates the DEF % field on the check form — blank def_pct on a no-DEF unit is structural, not skipped. Future model-to-spec table backfills from this |
-| units.op_status | 'staged' / 'running' / 'down' at archive time (TwinPak: per-engine in engines json) |
+| units.op_status | 'staged' / 'running' / 'offline' / 'down' at archive time (TwinPak: per-engine in engines json). 'running' displays as ONLINE in the app (render-only rename, 2026-10-09). 'offline' (added 2026-10-09) = in place, cabled, DELIBERATELY shut off — generator rotation / PM window, not a fault and not "never commissioned" (that's 'staged') |
 | units.location_type/-id | Where the unit stood **at archive time**, not during the show |
 | reports.* | One vital-sign check. Every field optional — blank means not observed, never zero |
 | reports.oil_pressure / fuel_psi | psi. fuel_psi is big-iron only (clogging-filter diagnostic) |
@@ -788,7 +788,7 @@ pins are the last logged movement, not surveyed positions.
 | issues.severity | 'cosmetic' / 'maintenance' / 'down' |
 | issues.from_report_id | Set = this issue was PROMOTED from that check's note (one tech tap on the check form). Blank = filed directly. Measures whether the issue flow is winning back the notes box |
 | movements.from/to_type | 'show' / 'shop' / 'transit' / 'fleet' (= unassigned) |
-| status_events.status | Operational status change event ('running'/'staged'/'down'), per engine when tagged |
+| status_events.status | Operational status change event ('running'/'staged'/'offline'/'down'), per engine when tagged. 'offline' exists only from 2026-10-09: before the cutover cycling crews logged deliberate shut-offs as 'staged', so pre-cutover staged↔running flip-flops on big iron are plant rotation, not churn (166 such transitions at the cutover, median 24 h parked) |
 `;
 }
 
