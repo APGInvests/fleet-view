@@ -810,10 +810,30 @@ function onJob(u){return !!u&&u.locationType==='show';}
    A show id that no longer resolves (deleted show) reads OPEN, so its units
    keep alerting rather than silently vanishing — bias to flagging. */
 function showClosed(sid){const s=showById(sid);return !!(s&&s.archivedAt);}
+/* OFFLINE and the clock (2026-10-09): a deliberately-off machine suppresses
+   the 6h stale nag and low-fuel exactly like staged — eight cycling main-stage
+   units must not nag every night. But silence must not be forever: after 14
+   days with no check and no fresh offline tap, it surfaces in Overdue as a
+   confirm. Cycling is daily-granularity (live data: median 24h parked), so a
+   real rotation never trips this; a forgotten machine degrades from silence
+   to a flag. Evidence resets the clock; absence escalates — bias-to-flagging
+   shaped. Staged keeps its never-nags behavior unchanged. */
+const OFFLINE_REARM_MS=14*24*3600e3;
+function offlineAnchor(u,e){
+  const ev=(S.status_events||[]).filter(x=>x.unitId===u.id&&(e?x.engine===e:true)&&x.status==='offline')
+    .reduce((m,x)=>Math.max(m,x.timestamp||0),0);
+  const t=e?engLastTs(u,e):lastCheckTs(u);
+  return Math.max(ev,t||0)||null;}
+function offlineConfirmDays(u,e){const st=e?engStatus(u,e):((u&&u.opStatus)||'staged');
+  if(st!=='offline'||!onJob(u)||showClosed(u.locationId))return null;
+  const a=offlineAnchor(u,e);if(!a)return null; /* no evidence at all: conservative-silent (offline only arrives by tap, so this can't occur organically) */
+  if((now()-a)<=OFFLINE_REARM_MS)return null;
+  return Math.floor((now()-a)/86400e3);}
 function owesCheck(u,e){
   if(!onJob(u))return false;
   if(showClosed(u.locationId))return false;
   const st=e?engStatus(u,e):((u&&u.opStatus)||'staged');
+  if(st==='offline')return offlineConfirmDays(u,e)!=null;
   if(st!=='running')return false;
   const t=e?engLastTs(u,e):lastCheckTs(u);
   const h=(S.settings.staleHours||6)*3600e3;
@@ -955,6 +975,8 @@ function computeStatus(u){
   if(sv.state==='over')reasons.push({t:(svTag?(svTag+'over'):'Over')+' service '+Math.abs(sv.remaining)+'h',cls:'bad'});
   else if(sv.state==='soon')reasons.push({t:svTag+sv.remaining+'h to service',cls:'warn'});
   if(low)reasons.push({t:'Fuel '+fuelLabel(u,fuel),cls:'warn'});
+  engList(u).forEach(e=>{const d=offlineConfirmDays(u,e);
+    if(d!=null)reasons.push({t:(e?(engName(u,e)+' '):'')+'offline '+d+'d — confirm it’s deliberate',cls:'warn'});});
   de.forEach(e=>reasons.push({t:engName(u,e)+' down',cls:'bad'}));
   oi.forEach(i=>reasons.push({t:((tw&&i.engine)?(engName(u,i.engine)+' · '):'')+(i.title||i.severity),cls:i.severity==='cosmetic'?'warn':'bad'}));
   /* State channel — what the machine IS. Half-down must not read as fully

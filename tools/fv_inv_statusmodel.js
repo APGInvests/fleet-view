@@ -169,4 +169,45 @@ module.exports = (app, t) => {
     t.eq(twin('offline', 'down').label, 'GEN B DOWN', 'down still outranks everything');
     t.eq(twin('offline', 'offline').color, 'teal', 'clean all-offline trailer reads calm');
   }
+
+  t.group('offline alerts: suppressed like staged, re-armed after 14 silent days');
+  {
+    const DAY = 864e5;
+    const offU = (daysAgo, extra = {}, reports = []) => {
+      const u = mkU(Object.assign({ opStatus: 'offline' }, extra));
+      base([u], { reports,
+        status_events: [{ id: 'se-' + u.id, unitId: u.id, engine: null,
+          status: 'offline', techName: 'Travis P.', timestamp: Date.now() - daysAgo * DAY }] });
+      return app.S.units[0]; };
+    t.eq(F.owesCheck(offU(1), null), false, 'offline 1d: no nag (the AQHC rotation)');
+    t.eq(F.owesCheck(offU(13), null), false, 'offline 13d: still quiet');
+    t.eq(F.owesCheck(offU(15), null), true, 're-arm: 15 silent days => owes a confirm');
+    t.eq(F.isStale(offU(15)), true, 'and it reaches the Overdue alert section via isStale');
+    // low fuel on a deliberately-off machine is not news:
+    const uF = offU(1, {}, [{ id: 'rf', unitId: 'pending', fuelLevelPct: 10,
+      timestamp: Date.now() - 3600e3 }]);
+    app.S.reports[0].unitId = uF.id;
+    t.eq(F.latestFuel(uF), 10, 'control: the low reading is on the record');
+    t.eq(F.lowFuel(uF), false, 'offline suppresses the low-fuel nag');
+    // a fresh check resets the re-arm clock:
+    const u15 = offU(15);
+    app.S.reports.push({ id: 'r9', unitId: u15.id, engine: null,
+      timestamp: Date.now() - 1 * DAY, techName: 'T' });
+    t.eq(F.owesCheck(u15, null), false, 'any check resets the 14d clock');
+    // and the card says why it surfaced:
+    const uOver = offU(15);
+    t.ok(F.computeStatus(uOver).reasons.some((r) => /offline 15d/.test(r.t)),
+      'reason chip: offline 15d — confirm');
+    t.ok(!F.computeStatus(offU(2)).reasons.some((r) => /offline/.test(r.t)),
+      'a cycling unit carries no confirm chip');
+    // staged behavior is UNTOUCHED (never re-arms):
+    base([mkU({ opStatus: 'staged' })]);
+    t.eq(F.owesCheck(app.S.units[0], null), false, 'staged never nags — status quo holds');
+    // closed show gates offline confirms exactly like every other nag:
+    const uc = mkU({ opStatus: 'offline' });
+    base([uc], { shows: [{ id: 's1', name: 'Show', archivedAt: 1 }],
+      status_events: [{ id: 'se-c', unitId: uc.id, engine: null, status: 'offline',
+        techName: 'T', timestamp: Date.now() - 20 * DAY }] });
+    t.eq(F.owesCheck(app.S.units[0], null), false, 'closed show: no offline confirm either');
+  }
 };
