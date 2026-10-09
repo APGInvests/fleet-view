@@ -74,7 +74,7 @@ module.exports = (app, t) => {
     const u = setup(mkUnit({ serial: 'P1', kw: 25, jobMeta: { 'sh-1': { area: 'Main Medical 480v', note: '' } } }));
     const h = app.fn.pinPopupHtml(u, 'sh-1');
     t.includes(h, 'Main Medical 480v', 'title stays jobLabel');
-    t.includes(h, 'RUNNING', 'status line stays');
+    t.includes(h, 'ONLINE', 'status line stays (RUNNING renders ONLINE since 2026-10-09)');
     t.includes(h, 'openUnit', 'Open action stays');
     t.includes(h, 'openPinEditor', 'Move action stays');
     t.includes(h, 'mapSetLoc', 'Set-to-my-location stays');

@@ -36,7 +36,7 @@
   :root{
     --bg:#191714; --card:#221f1b; --surface2:#2b2723; --ink:#efe7d9; --ink2:#a99e8f; --line:#38332c;
     --accent:#c77455; --accent-ink:#191714;
-    --green:#4fae7a; --yellow:#e0b23f; --orange:#e2823f; --red:#dc5142; --grey:#8a8175; --blue:#6b93d6;
+    --green:#4fae7a; --yellow:#e0b23f; --orange:#e2823f; --red:#dc5142; --grey:#8a8175; --blue:#6b93d6; --teal:#53a08f;
     --serif:'Playfair Display',Georgia,'Times New Roman',serif;
     --mono:'Space Mono','SFMono-Regular',Menlo,Consolas,monospace;
     --shadow:0 1px 2px rgba(0,0,0,.45),0 12px 34px rgba(0,0,0,.4);
@@ -49,7 +49,7 @@
   :root[data-theme="light"]{
     --bg:#f4eee3; --card:#fffdf7; --surface2:#ece4d6; --ink:#211e19; --ink2:#857b6b; --line:#e3dacb;
     --accent:#bd5f45;
-    --green:#1f9d57; --yellow:#c98f14; --orange:#cf6420; --red:#c5302a; --grey:#8a8073; --blue:#2f6fd0;
+    --green:#1f9d57; --yellow:#c98f14; --orange:#cf6420; --red:#c5302a; --grey:#8a8073; --blue:#2f6fd0; --teal:#1f7d6d;
     --shadow:0 1px 2px rgba(60,45,25,.07),0 12px 30px rgba(60,45,25,.10);
     --topbar-bg:#fffdf7; --showbar-bg:#efe8db; --input-bg:#fffdf7;
     --chip-bg:#ece4d5; --chip-ink:#6d6455;
@@ -928,7 +928,14 @@ function engServiceState(u,e){if(!isTwin(u)||!e)return svcCalc(u?u.serviceDueHou
 const SVC_RANK={unknown:0,ok:1,soon:2,over:3};
 function worstServiceEngine(u){let we=null,best=null;ENG.forEach(e=>{const s=engServiceState(u,e);if(!best||SVC_RANK[s.state]>SVC_RANK[best.state]){best=s;we=e;}});return{engine:we,sv:best||{state:'unknown',remaining:null}};}
 function serviceState(u){if(!isTwin(u))return svcCalc(u?u.serviceDueHours:null,u?u.currentHours:null);return worstServiceEngine(u).sv;}
-const SC={green:'var(--green)',yellow:'var(--yellow)',orange:'var(--orange)',red:'var(--red)',grey:'var(--grey)',blue:'var(--blue)'};
+const SC={green:'var(--green)',yellow:'var(--yellow)',orange:'var(--orange)',red:'var(--red)',grey:'var(--grey)',blue:'var(--blue)',teal:'var(--teal)'};
+/* Operating state: what the machine IS. The condition (service/fuel/issues)
+   colors the stripe and the map pin; it may NEVER displace the state label.
+   'running' stays the stored string and renders ONLINE (render-only rename,
+   the kW pattern); 'offline' = in place, cabled, deliberately shut off —
+   plant rotation / PM window, teal because it must read as normal, not alarm. */
+const STATE_LABEL={running:'ONLINE',offline:'OFFLINE',staged:'STAGED',down:'DOWN',transit:'IN TRANSIT'};
+const STATE_COLOR={running:'green',offline:'teal',staged:'grey',down:'red',transit:'blue'};
 function computeStatus(u){
   const reasons=[];const oi=openIssuesFor(u.id);const sv=serviceState(u);const fuel=latestFuel(u);
   const tw=isTwin(u);const st=chassisStatus(u);const de=downEngines(u);
@@ -942,16 +949,23 @@ function computeStatus(u){
   if(low)reasons.push({t:'Fuel '+fuelLabel(u,fuel),cls:'warn'});
   de.forEach(e=>reasons.push({t:engName(u,e)+' down',cls:'bad'}));
   oi.forEach(i=>reasons.push({t:((tw&&i.engine)?(engName(u,i.engine)+' · '):'')+(i.title||i.severity),cls:i.severity==='cosmetic'?'warn':'bad'}));
-  /* Half-down must not read as fully dead: attribute the engine when they disagree. */
-  if(down)return{color:'red',label:(de.length&&de.length<ENG.length)?(engName(u,de[0]).toUpperCase()+' DOWN'):'DOWN',reasons};
-  if(sv.state==='over')return{color:'orange',label:'OVER SERVICE',reasons};
-  if(maint)return{color:'orange',label:'NEEDS SERVICE',reasons};
-  if(low)return{color:'orange',label:'LOW FUEL',reasons};
-  if(sv.state==='soon')return{color:'orange',label:'SERVICE SOON',reasons};
-  if(cosm)return{color:'yellow',label:'COSMETIC',reasons};
-  if(u.locationType==='transit')return{color:'blue',label:'IN TRANSIT',reasons};
-  if(st==='running')return{color:'green',label:'RUNNING',reasons};
-  return{color:'grey',label:'STAGED',reasons};
+  /* State channel — what the machine IS. Half-down must not read as fully
+     dead: attribute the engine when they disagree. */
+  let state,label;
+  if(down){state='down';label=(de.length&&de.length<ENG.length)?(engName(u,de[0]).toUpperCase()+' DOWN'):'DOWN';}
+  else if(u.locationType==='transit'){state='transit';label='IN TRANSIT';}
+  else if(st==='running'){state='running';label='ONLINE';}
+  else if(st==='offline'){state='offline';label='OFFLINE';}
+  else{state='staged';label='STAGED';}
+  /* Condition channel — the worst thing wrong, same priority the label chain
+     had before 2026-10-09 (red > orange > yellow > blue > state color). It
+     drives the stripe and the map pin; the pill is state-only forever. */
+  let color;
+  if(down)color='red';
+  else if(sv.state==='over'||maint||low||sv.state==='soon')color='orange';
+  else if(cosm)color='yellow';
+  else color=STATE_COLOR[state];
+  return{color,state,label,stateColor:STATE_COLOR[state],reasons};
 }
 /* The badge is the union of the four alert sections, by construction — so the number
    on the tab can never disagree with what you find when you open it. */
@@ -978,7 +992,7 @@ function refreshTopBar(){const s=currentShow();$('#jobIc').innerHTML=IC[S.settin
   else{$('#showName').textContent='Select a job';$('#showSub').textContent=S.shows.length+' jobs';}}
 function updateBadge(){const n=S.units.filter(needsAttention).length;const b=$('#alertBadge');if(b){b.textContent=n;b.classList.toggle('on',n>0);}}
 /* ===== CARDS ===== */
-function statusPill(cs){return `<span class="pill" style="background:${SC[cs.color]}${cs.color==='yellow'?';color:#4a3a00':''}">${cs.label}</span>`;}
+function statusPill(cs){return `<span class="pill" style="background:${SC[cs.stateColor]}">${cs.label}</span>`;}
 function fuelBar(u){const f=latestFuel(u);if(f==null)return '';const c=f<20?'var(--red)':(f<50?'var(--orange)':'var(--green)');
   return `<div class="fuel"><span class="fl">FUEL</span><span class="track"><span class="fill" style="width:${Math.max(3,Math.min(100,f))}%;background:${c}"></span></span><span class="pct" style="color:${c}">${fuelLabel(u,f)}</span></div>`;}
 function jm(u,sid){return (u.jobMeta&&sid&&u.jobMeta[sid])?u.jobMeta[sid]:{};}
@@ -1188,7 +1202,7 @@ function renderFleet(){let list=S.units.slice();
 function rerenderFleet(){const v=$('#view');const sc=v.querySelector('.searchbar input');const pos=sc?sc.selectionStart:null;v.innerHTML=renderFleet();const ni=v.querySelector('.searchbar input');if(ni){ni.focus();if(pos!=null)try{ni.setSelectionRange(pos,pos);}catch(e){}}}
 /* ===== MAP ===== */
 let mapObj=null,mapScope='job',mapFocusUnit=null;
-function statusHex(c){return {green:'#2fa96a',orange:'#e2823f',red:'#dc5142',yellow:'#e0b23f',grey:'#8a8175',blue:'#2f7bde'}[c]||'#c77455';}
+function statusHex(c){return {green:'#2fa96a',orange:'#e2823f',red:'#dc5142',yellow:'#e0b23f',grey:'#8a8175',blue:'#2f7bde',teal:'#53a08f'}[c]||'#c77455';}
 /* ===== BASEMAP (street + satellite) =====
    One constructor for every map in the app. Layers, per-layer attribution (the
    control shows only the ACTIVE layer's credit), the USGS maxNativeZoom ceiling,
@@ -1237,7 +1251,10 @@ function showUnitOnMap(unitId){const u=unitById(unitId);if(!u)return;if(!unitGps
    repeat line 2), no "Asset" placeholder ever. */
 function mmJunk(t){return /\d+\s*(kva|kw)/i.test(t);}
 function pinPopupHtml(u,sid){
-  const cc=statusHex(computeStatus(u).color);
+  /* Popup status line: dot + word both speak the STATE; the pin itself keeps
+     the condition color, so an orange pin still means trouble from across
+     the site (state/condition split, 2026-10-09). */
+  const cc=statusHex(computeStatus(u).stateColor);
   const _area=jobLabel(u,sid)||'Unplaced';
   const mm=[u.make,u.model].map(x=>String(x||'').trim()).filter(Boolean).join(' ');
   const sz=sizeText(u);
@@ -1550,8 +1567,8 @@ function identityCard(u,e){
    a red chassis chip must never read as "the whole trailer is dead". */
 function engineRow(u,e){
   const st=engStatus(u,e);const ts=engLastTs(u,e);const hrs=engHours(u,e);
-  const col=st==='down'?'var(--red)':(st==='running'?'var(--green)':'var(--grey)');
-  const word=st?st.toUpperCase():'NOT YET CHECKED';
+  const col=st==='down'?'var(--red)':(st==='running'?'var(--green)':(st==='offline'?'var(--teal)':'var(--grey)'));
+  const word=st?(STATE_LABEL[st]||st.toUpperCase()):'NOT YET CHECKED';
   return `<div class="card" style="padding:10px 12px;margin-bottom:8px;border-left:5px solid ${col}">
     <div class="between"><b style="font-size:14px">${esc(engName(u,e))} <span style="font-weight:400;color:${col};font-size:12px">&#9679; ${word}</span></b><span class="muted" style="font-size:11px">${hrs!=null?(Number(hrs).toLocaleString()+' h'):'no hours'} · ${ts?esc(fmtAgo(ts)):'never checked'}</span></div>
     <div style="margin-top:9px">${statusSeg(u,e)}</div>

@@ -89,7 +89,7 @@ module.exports = async (app, t) => {
   u = app.S.units[0];
   t.eq(F.isTwin(u), false, 'no engines => not a twin');
   t.eq(F.engHours(u, null), 100, 'single-engine hours unchanged');
-  t.eq(F.computeStatus(u).label, 'RUNNING', 'single-engine label byte-identical (no attribution)');
+  t.eq(F.computeStatus(u).label, 'ONLINE', 'single-engine label identical modulo the 2026-10-09 render-only rename (no attribution)');
   t.eq(F.serviceState(u).remaining, 250, 'single-engine service math unchanged');
   app.setState({ units: [single({ opStatus: 'down' })], reports: [] });
   t.eq(F.computeStatus(app.S.units[0]).label, 'DOWN', 'single-engine DOWN label byte-identical');
@@ -100,9 +100,9 @@ module.exports = async (app, t) => {
     app.setState({ units: [twin({ engines: engs(a, b, style) })], reports: [] });
     return F.computeStatus(app.S.units[0]);
   };
-  t.eq(chassis('running', 'running').label, 'RUNNING', 'both running => RUNNING');
+  t.eq(chassis('running', 'running').label, 'ONLINE', 'both running => ONLINE');
   t.eq(chassis('running', 'staged').color, 'green', 'one on load, one on standby is NOT idle => green');
-  t.eq(chassis('running', 'staged').label, 'RUNNING', 'standby engine does not make the trailer staged');
+  t.eq(chassis('running', 'staged').label, 'ONLINE', 'standby engine does not make the trailer staged');
   t.eq(chassis('staged', 'staged').label, 'STAGED', 'nothing running => STAGED');
   t.eq(chassis('running', 'down').color, 'red', 'any engine down => trailer red');
   t.eq(chassis('down', 'down').color, 'red', 'both down => red');
@@ -368,7 +368,7 @@ module.exports = async (app, t) => {
   F.openUnit('tw');
   sh = app.document.getElementById('sheet').innerHTML;
   t.includes(sh, 'GEN B DOWN', 'the chassis header names the down engine');
-  t.includes(sh, '&#9679; RUNNING', "Gen A's row still reads RUNNING");
+  t.includes(sh, '&#9679; ONLINE', "Gen A's row still reads ONLINE (stored 'running', render-only rename)");
   t.includes(sh, '&#9679; DOWN', "Gen B's row reads DOWN, side by side with A");
 
   /* ---------------------------------------------------------------- */
