@@ -939,16 +939,38 @@ function statusSeg(u,e){const cur=e?engStatus(u,e):((u&&u.opStatus)||'staged');
   const downNote=cur==='down'?`<div class="uloc bad" style="margin:0 0 7px">${IC.warn}<span>DOWN — resolve its issue (Issues tab) to bring it back</span></div>`:'';
   return downNote+`<div class="segwrap" style="margin:0">${STATUS_OPTS.map(([v,l,c])=>`<button type="button" data-v="${v}" class="${cur===v?'on':''}" style="${cur===v?('background:'+c+';color:#fff'):''}" onclick="setStatus('${u.id}','${e||''}','${v}')">${l}</button>`).join('')}</div>`;}
 function statusEventsFor(id,e){return (S.status_events||[]).filter(x=>x.unitId===id&&(e?x.engine===e:true)).sort((a,b)=>b.timestamp-a.timestamp);}
-function setStatus(unitId,eng,st){const u=unitById(unitId);if(!u)return;const e=(eng&&isTwin(u))?eng:null;
+/* ===== DOWN COUPLING (2026-10-09) =====
+   Down has ONE writer — Flag Issue → Hard down (saveIssue, unchanged). The two
+   stuck states this closes: (a) Resolve flipped only the boolean, so a fixed
+   machine stayed red forever; (b) flipping status under an open down issue
+   left the card red with no explanation. Recovery asks, never assumes:
+   restored health is an observation, so nothing preselects (rule 3). Both
+   sheets are named HTML builders (the pinPopupHtml testability pattern). */
+function backUpAskHtml(u,e){
+  const who=e?(' · '+engName(u,e)):'';
+  return `<p style="margin-top:0">Issue resolved. Where does this leave <b>#${esc(u.serial||u.tagId)}</b>${esc(who)}?</p>
+  <p class="muted" style="font-size:12px;margin:0 0 12px">Resolving the issue doesn't flip the status — say what the machine is doing now.</p>
+  <div class="segwrap" style="margin:0 0 12px">${STATUS_OPTS.map(([v,l])=>`<button type="button" data-v="${v}" onclick="setStatus('${u.id}','${e||''}','${v}')">${l}</button>`).join('')}</div>
+  <button class="btn ghost block" onclick="renderUnit('${u.id}')">Still down — leave it</button>`;}
+function statusVsIssuesHtml(u,e,st,dIss){
+  const l=STATUS_OPTS.find(x=>x[0]===st);const word=l?l[1]:st;
+  return `<p style="margin-top:0"><b>${esc(dIss[0].title||'A down issue')}</b>${dIss.length>1?(' and '+(dIss.length-1)+' more'):''} is still open — it keeps this unit red whatever the status says.</p>
+  <button class="btn primary block" onclick="setStatus('${u.id}','${e||''}','${st}',true)">Resolve it &amp; set ${esc(word)}</button>
+  <button class="btn dark block" style="margin-top:9px" onclick="setStatus('${u.id}','${e||''}','${st}',false)">Set ${esc(word)}, keep the issue open</button>
+  <button class="btn ghost block" style="margin-top:9px" onclick="renderUnit('${u.id}')">Cancel</button>`;}
+function setStatus(unitId,eng,st,alsoResolve){const u=unitById(unitId);if(!u)return;const e=(eng&&isTwin(u))?eng:null;
   const cur=e?engStatus(u,e):((u&&u.opStatus)||'staged');
   if(cur===st)return;
+  const dIss=openIssuesFor(unitId).filter(i=>i.severity==='down'&&(e?i.engine===e:true));
+  if(st!=='down'&&dIss.length&&alsoResolve===undefined){sheet('Open down issue',statusVsIssuesHtml(u,e,st,dIss));return;}
   requireTech(()=>{
+    if(alsoResolve)dIss.forEach(i=>{i.resolved=true;});
     S.status_events=S.status_events||[];
     S.status_events.push({id:uid('se'),unitId:unitId,engine:e,status:st,techName:S.settings.techName,timestamp:now()});
     if(e){const eg=Object.assign({},u.engines);eg[e]=Object.assign({},(eg[e]&&typeof eg[e]==='object')?eg[e]:{},{opStatus:st});u.engines=eg;}
     else u.opStatus=st;
     u.updatedAt=now();save();renderUnit(unitId);
-    toast((e?engName(u,e):'Unit')+' set to '+st);
+    toast((e?engName(u,e):'Unit')+' set to '+(STATE_LABEL[st]||st).toLowerCase());
   });}
 /* ===== STATUS ===== */
 function svcCalc(due,cur){if(due==null||cur==null)return{state:'unknown',remaining:null};const rem=Math.round((due-cur)*10)/10;if(rem<=0)return{state:'over',remaining:rem};if(rem<=(S.settings.warnHours||20))return{state:'soon',remaining:rem};return{state:'ok',remaining:rem};}
@@ -1710,7 +1732,18 @@ function paneVitals(u){const tw=isTwin(u);const rs=(tw&&vitalsEng)?engReports(u,
   const vr=voidableReport(u,tw?vitalsEng:null);
   return `${chips}${vr?`<button class="btn ghost block sm" style="margin-bottom:10px" onclick="voidCheck('${vr.id}','${u.id}')">Void my check from ${esc(fmtAgo(vr.timestamp))} — filed by mistake</button>`:''}${lr?`<div class="card" style="padding:13px;margin-bottom:12px"><div class="between"><b>Latest check${etag(lr)}</b><span class="muted" style="font-size:12px">${fmtDate(lr.timestamp)} · ${esc(lr.techName||'')}</span></div><div class="kv" style="margin-top:9px">${vk('Volt L-L',lr.voltageLL,'V')}${vk('Volt L-N',lr.voltageLN,'V')}${vk('Amps L1',lr.ampsL1,'A')}${vk('Amps L2',lr.ampsL2,'A')}${vk('Amps L3',lr.ampsL3,'A')}${vk('Hz',lr.hz,'')}${vk('Load',lr.loadKw,'kW')}${vk('Load',lr.loadPct,'%')}${derivedLoadPct(lr)!=null?vk('Load est','~'+derivedLoadPct(lr),'%'):''}${vk('Coolant temp',lr.coolantTemp,'°')}${vk('Oil P',lr.oilPressure,'psi')}${vk('Fuel P',lr.fuelPsi,'psi')}${vk('Fuel rate',lr.fuelGph,' gal/hr')}${fuelVk(u,lr.fuelLevelPct)}${vk('Batt',lr.batteryV,'V')}${vk('DEF',lr.defPct,'%')}${vk('Hrs',lr.engineHours,'')}</div>${lr.notes?`<div style="margin-top:8px;font-size:13px">📝 ${esc(lr.notes)}</div>`:''}${g?`<div style="margin-top:8px;font-size:13px">${gpsLink(g)}</div>`:''}</div>`:`<div class="empty" style="padding:22px"><p class="muted">No checks yet${(tw&&vitalsEng)?(' on '+esc(engName(u,vitalsEng))):''}. Tap Check${(tw&&vitalsEng)?(' '+esc(engName(u,vitalsEng))):''}.</p></div>`}${(tankSpecFor(u)&&unitShowId(u))?(function(){const fm=fuelUnitForUnit(u);const sid=unitShowId(u);return `<div class="between" style="margin:0 0 10px"><span class="muted" style="font-size:12px">Fuel readout — this show</span><div class="segwrap" style="max-width:120px"><button type="button" class="${fm!=='in'?'on':''}" style="${fm!=='in'?'background:var(--accent);color:#fff':''}" onclick="fuelUnitSet('${sid}','pct','${u.id}')">%</button><button type="button" class="${fm==='in'?'on':''}" style="${fm==='in'?'background:var(--accent);color:#fff':''}" onclick="fuelUnitSet('${sid}','in','${u.id}')">in</button></div></div>`;})():''}${recentChecksTable(rs)}${checkSummary(u,rs)}${checkHistory(u,rs)}`;}
 function paneIssues(u){const is=issuesFor(u.id);return is.length?is.map(i=>`<div class="card" style="padding:12px;margin-bottom:9px;border-left:5px solid ${i.severity==='down'?'var(--red)':i.severity==='maintenance'?'var(--orange)':'var(--yellow)'}"><div class="between"><b>${esc(i.title||i.severity)}${(isTwin(u)&&i.engine)?`<span class="chip" style="font-size:10px;margin-left:6px">${esc(engName(u,i.engine))}</span>`:''}</b><button class="btn sm ${i.resolved?'ghost':'dark'}" onclick="toggleIssue('${i.id}','${u.id}')">${i.resolved?'Reopen':'Resolve'}</button></div><div style="font-size:13px;margin-top:4px">${esc(i.text||'')}</div>${i.photos&&i.photos.length?photoStrip(i.photos,"bigIssuePhoto('"+i.id+"',",null):''}<div class="muted" style="font-size:11px;margin-top:6px">${i.resolved?'✓ resolved · ':''}${fmtDate(i.timestamp)} · ${esc(i.techName||'')}${i.fromReportId?' · ⚑ from a check':''}</div></div>`).join(''):'<div class="empty" style="padding:22px"><p class="muted">No issues. 🎉</p></div>';}
-function toggleIssue(iid,u_){const i=S.issues.find(x=>x.id===iid);if(i){i.resolved=!i.resolved;save();renderUnit(u_);}}
+function toggleIssue(iid,u_){const i=S.issues.find(x=>x.id===iid);if(!i)return;
+  i.resolved=!i.resolved;save();
+  const u=unitById(i.unitId);
+  /* Resolving the LAST open down issue on a down lane asks for the new state —
+     a fixed machine must not stay red forever, and restored health must be a
+     human's claim, never an inference (rule 3). */
+  if(i.resolved&&i.severity==='down'&&u){
+    const e=(i.engine&&isTwin(u))?i.engine:null;
+    const still=openIssuesFor(u.id).some(x=>x.severity==='down'&&(e?x.engine===e:true));
+    const cur=e?engStatus(u,e):((u.opStatus)||'staged');
+    if(!still&&cur==='down'){sheet('Back in service?',backUpAskHtml(u,e));return;}}
+  renderUnit(u_);}
 function serviceCard(u,e,sv){const cls=sv.state==='over'?'bad':(sv.state==='soon'?'warn':'ok');const cur=engHours(u,e);const due=e?engMeta(u,e).serviceDueHours:u.serviceDueHours;
   return `<div class="card" style="padding:14px;margin-bottom:12px"><div class="between"><b>${e?esc(engName(u,e)):'Service countdown'}</b>${sv.state!=='unknown'?`<span class="chip ${cls}" style="font-size:13px">${sv.remaining<=0?('OVER '+Math.abs(sv.remaining)+'h'):(sv.remaining+'h left')}</span>`:'<span class="chip">not set</span>'}</div><div class="kv" style="margin-top:10px"><div class="k">Current hrs</div><div>${cur!=null?(Number(cur).toLocaleString()+(engPreSplit(u,e)?' <span class="muted" style="font-size:11px">(pre-split)</span>':'')):'<span class="muted">No checks yet</span>'}</div><div class="k">Service at</div><div>${due!=null?(Number(due).toLocaleString()+' h'):'—'}</div></div><div class="row" style="margin-top:12px"><button class="btn ghost wide" onclick="editService('${u.id}','${e||''}')">Edit target</button><button class="btn dark wide" onclick="markServiced('${u.id}','${e||''}')">Mark serviced</button></div></div>`;}
 function paneService(u,sv){

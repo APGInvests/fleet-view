@@ -210,4 +210,81 @@ module.exports = (app, t) => {
         techName: 'T', timestamp: Date.now() - 20 * DAY }] });
     t.eq(F.owesCheck(app.S.units[0], null), false, 'closed show: no offline confirm either');
   }
+
+  t.group('coming back up: resolving the last down issue asks for the new state');
+  {
+    const mkDown = () => { const u = mkU({ opStatus: 'down' });
+      base([u], { issues: [{ id: 'i1', unitId: u.id, severity: 'down',
+        title: 'Coolant leak', text: '', resolved: false, engine: null,
+        techName: 'T', timestamp: 1 }] });
+      return u; };
+    const u = mkDown();
+    const h = F.backUpAskHtml(u, null);
+    ['staged', 'running', 'offline'].forEach((v) =>
+      t.includes(h, "'" + v + "'", 'offers ' + v));
+    t.excludes(h.replace(/style="[^"]*"/g, ''), 'class="on"',
+      'NO preselect — restored health must be claimed by a human (rule 3)');
+    t.includes(h, 'Still down', 'an honest escape hatch: leave it down');
+    // The wiring: resolving the LAST open down issue on a down unit routes to the ask.
+    F.toggleIssue('i1', u.id);
+    t.includes(app.document.querySelector('#sheet').innerHTML, 'Back in service?',
+      'resolve on a down unit opens the state ask');
+    t.eq(app.S.issues[0].resolved, true, 'the issue did resolve');
+    t.eq(app.S.units[0].opStatus, 'down', 'but status is not flipped silently');
+    // Tapping Online from the ask writes the event (issues already resolved => no re-prompt).
+    F.setStatus(u.id, '', 'running');
+    t.eq(app.S.units[0].opStatus, 'running', 'the human claim lands');
+    t.eq(app.S.status_events.length, 1, 'exactly one status event, name-stamped');
+    t.eq(app.S.status_events[0].status, 'running', 'and it says running');
+    // Resolving a NON-down issue, or with another down issue still open, never asks.
+    const u2 = mkU({ opStatus: 'down' });
+    base([u2], { issues: [
+      { id: 'i2', unitId: u2.id, severity: 'down', title: 'A', resolved: false, engine: null, techName: 'T', timestamp: 1 },
+      { id: 'i3', unitId: u2.id, severity: 'down', title: 'B', resolved: false, engine: null, techName: 'T', timestamp: 2 }] });
+    F.toggleIssue('i2', u2.id);
+    t.excludes(app.document.querySelector('#sheet').innerHTML, 'Back in service?',
+      'a second open down issue keeps the unit down — no ask yet');
+  }
+
+  t.group('going around an open down issue: the tap offers to resolve it');
+  {
+    const u = mkU({ opStatus: 'down' });
+    base([u], { issues: [{ id: 'i1', unitId: u.id, severity: 'down',
+      title: 'Coolant leak', text: '', resolved: false, engine: null,
+      techName: 'T', timestamp: 1 }] });
+    const h = F.statusVsIssuesHtml(u, null, 'running', F.openIssuesFor(u.id));
+    t.includes(h, 'Coolant leak', 'names the issue in the way');
+    t.includes(h, 'Resolve', 'offers resolve-and-set');
+    t.includes(h, 'keep', 'offers set-but-keep-open (never blocked)');
+    // The routing: a quick-row tap with an open down issue asks instead of writing.
+    F.setStatus(u.id, '', 'running');
+    t.eq(app.S.units[0].opStatus, 'down', 'no silent write under an open down issue');
+    t.eq((app.S.status_events || []).length, 0, 'no event either');
+    t.includes(app.document.querySelector('#sheet').innerHTML, 'Coolant leak', 'the ask is on screen');
+    // Resolve & set:
+    F.setStatus(u.id, '', 'running', true);
+    t.eq(app.S.issues[0].resolved, true, 'resolve-and-set resolves the issue');
+    t.eq(app.S.units[0].opStatus, 'running', 'and sets the state');
+    t.eq(app.S.status_events.length, 1, 'one event');
+    // Set-but-keep: fresh fixture.
+    const u3 = mkU({ opStatus: 'down' });
+    base([u3], { issues: [{ id: 'i9', unitId: u3.id, severity: 'down',
+      title: 'Leak', text: '', resolved: false, engine: null, techName: 'T', timestamp: 1 }] });
+    F.setStatus(u3.id, '', 'offline', false);
+    t.eq(app.S.issues[0].resolved, false, 'keep-open keeps the issue');
+    t.eq(app.S.units[0].opStatus, 'offline', 'but the state is set');
+    t.eq(F.computeStatus(app.S.units[0]).label, 'DOWN', 'and the open down issue honestly keeps the card DOWN');
+    // Hostile string through the ask (it is esc()d — prove it):
+    const u4 = mkU({ opStatus: 'down' });
+    base([u4], { issues: [{ id: 'i4', unitId: u4.id, severity: 'down',
+      title: '<img src=x onerror=alert(1)>"quote"', text: '', resolved: false,
+      engine: null, techName: 'T', timestamp: 1 }] });
+    const h4 = F.statusVsIssuesHtml(u4, null, 'running', F.openIssuesFor(u4.id));
+    t.excludes(h4, '<img', 'issue title is escaped in the ask');
+    // The direct path is untouched: no down issue => the event writes immediately.
+    base([mkU({ opStatus: 'staged' })]);
+    F.setStatus(app.S.units[0].id, '', 'offline');
+    t.eq(app.S.status_events.length, 1, 'no-issue tap writes exactly one event');
+    t.eq(app.S.units[0].opStatus, 'offline', 'and flips the unit');
+  }
 };
