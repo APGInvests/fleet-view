@@ -81,7 +81,11 @@ module.exports = async (app, t) => {
   t.eq(app.fn.hoursSuggest('12641', 2640, ago7, T0), 2641, 'drop-a-digit suggestion lands on 2641');
   t.eq(app.fn.hoursSuggest('99999', 2640, ago7, T0), null, 'no plausible candidate -> no suggestion');
 
-  t.group('hours sanity: inline warning on the check form, never a gate');
+  /* AMENDED 2026-10-10 (check-hardflags, Andy's direction): the warning is no
+     longer outrunnable by the Save tap — an impossible hours value now takes
+     TWO taps (the hard gate in saveVitals). The §8 rule 4 core is unchanged
+     and still pinned below: it never BLOCKS, and the value saves untouched. */
+  t.group('hours sanity: inline warning on the check form, never a block');
   app.setState({
     units: [mkUnit({ id: 'u-hrs', klass: 'big', kw: 500 }),
             mkUnit({ id: 'u-fresh', klass: 'big', kw: 500 }),
@@ -111,7 +115,10 @@ module.exports = async (app, t) => {
   t.eq(warn(), '', 'plausible reading stays silent');
   type('12641');
   app.fn.saveVitals('u-hrs');
-  t.eq(lastReport('u-hrs').engineHours, 12641, 'WARN NEVER BLOCKS: the typed value saves untouched');
+  t.ok(!lastReport('u-hrs') || lastReport('u-hrs').engineHours !== 12641,
+    'impossible hours now gates the first tap (2026-10-10 amendment)');
+  app.fn.saveVitals('u-hrs');
+  t.eq(lastReport('u-hrs').engineHours, 12641, 'WARN NEVER BLOCKS: the second tap saves the typed value untouched');
 
   app.fn.logVitals('u-fresh');
   type('50');

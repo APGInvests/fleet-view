@@ -215,7 +215,9 @@ module.exports = async (app, t) => {
     app.fn.setFuelUnit('show-A', 'in');
     app.fn.logVitals('u-fu-e');
     t.includes(app.document.querySelector('#sheet').innerHTML, 'v_fuelEcho', 'echo line rendered in the form markup');
-    t.includes(app.document.querySelector('#sheet').innerHTML, 'oninput="fuelEcho()"', 'fuel input drives the echo live');
+    /* markup anchor amended 2026-10-10: check-hardflags chained hdDeb() onto the
+       fuel input — the echo contract itself is unchanged */
+    t.includes(app.document.querySelector('#sheet').innerHTML, 'oninput="fuelEcho();hdDeb()"', 'fuel input drives the echo live');
     t.eq(typed('4.125'), '= 4⅛″ · 38%', 'typed 4.125 echoes the stick mark it means, with the stored pct');
     t.eq(typed('1.3'), '= 1⅜″ · 12%', 'an off-mark value echoes the mark it snaps to — the tech SEES the snap');
     t.eq(typed('11'), '= 11″ · 100%', 'full tank echoes clean');
